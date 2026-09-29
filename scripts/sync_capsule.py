@@ -30,6 +30,8 @@ KEEP = (
     ".codeocean/secrets.json",
     ".codeocean/datasets.json",
     "environment/environment.yml",  # Code Ocean credentials (newer format of secrets.json)
+    ".codeocean/environment.json",  # written by Code Ocean after each environment build
+    "metadata/metadata.yml",  # capsule name/description edited in the Code Ocean UI
     "code/*.ipynb",
 )
 WEIGHTS = "trailmap-axon-210409"
