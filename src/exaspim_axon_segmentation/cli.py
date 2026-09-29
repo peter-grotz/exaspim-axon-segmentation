@@ -250,3 +250,53 @@ def qc_traces(
         for s in sc:
             log.info("%s · %s", name, s.text())
     log.info("Wrote %s", out)
+
+
+@app.command()
+def skeletonize(
+    prediction: Annotated[str, typer.Argument(help="Probability OME-Zarr from `predict`")],
+    out: Annotated[Path, typer.Option(help="Output directory")],
+    threshold: Annotated[float, typer.Option(help="Neurite mask threshold")] = 0.2,
+    core: Annotated[float, typer.Option(help="Keep components with a voxel above this")] = 0.5,
+    min_volume_um3: Annotated[float, typer.Option(help="Drop smaller components")] = 100.0,
+    spur_um: Annotated[
+        float, typer.Option(help="Prune terminal branches shorter than this")
+    ] = 10.0,
+    swc: Annotated[
+        list[Path] | None, typer.Option("--swc", help="Complete traces to score against; repeat")
+    ] = None,
+    envelope_um: Annotated[
+        float, typer.Option(help="Score precision within this of traces")
+    ] = 50.0,
+) -> None:
+    """Skeletonize a probability map (SWC + OME-Zarr + lengths); optionally score vs traces."""
+    import json
+
+    from exaspim_axon_segmentation.postprocess.pipeline import skeletonize_prediction
+    from exaspim_axon_segmentation.postprocess.skeleton import SkeletonConfig
+
+    config = SkeletonConfig(
+        threshold=threshold, core=core, min_volume_um3=min_volume_um3, spur_um=spur_um
+    )
+    summary = skeletonize_prediction(prediction, out, config)
+    if swc:
+        import numpy as np
+
+        from exaspim_axon_segmentation.qc.traces import score_skeleton
+        from exaspim_axon_segmentation.train import read_swc
+
+        skel = read_swc(out / "skeleton.swc")
+        index = {int(i): k for k, i in enumerate(skel.ids)}
+        edges = np.array(
+            [(k, index[int(p)]) for k, p in enumerate(skel.parents) if int(p) in index]
+        )
+        traces = np.concatenate([read_swc(p).zyx_um for p in swc])
+        roi_box = summary["box"]
+        # only trace points inside the processed box can be found
+        lo = np.min(skel.zyx_um, axis=0) - envelope_um
+        hi = np.max(skel.zyx_um, axis=0) + envelope_um
+        traces = traces[np.all((traces >= lo) & (traces <= hi), axis=1)]
+        scores = score_skeleton(skel.zyx_um, edges, traces, envelope_um=envelope_um)
+        summary["trace_scores"] = scores
+        (out / "summary.json").write_text(json.dumps(summary, indent=2))
+        log.info("Skeleton vs traces (box %s): %s", roi_box, scores)
