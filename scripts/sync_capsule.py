@@ -25,7 +25,13 @@ from exaspim_axon_segmentation.model import REGISTRY
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "capsule"
 PACKAGE_FILES = ["pyproject.toml", "uv.lock", "README.md", "LICENSE", "src"]
-KEEP = (".git", ".codeocean/secrets.json", ".codeocean/datasets.json", "code/*.ipynb")
+KEEP = (
+    ".git",
+    ".codeocean/secrets.json",
+    ".codeocean/datasets.json",
+    "environment/environment.yml",  # Code Ocean credentials (newer format of secrets.json)
+    "code/*.ipynb",
+)
 WEIGHTS = "trailmap-axon-210409"
 
 
