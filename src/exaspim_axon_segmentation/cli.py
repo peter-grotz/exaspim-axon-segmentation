@@ -61,6 +61,9 @@ def predict(
     foreground_level: Annotated[
         float, typer.Option(help="foreground mode: input value of the median foreground voxel")
     ] = 0.25,
+    floor_percentile: Annotated[
+        float, typer.Option(help="foreground mode: noise-floor percentile; 0 disables")
+    ] = 98.0,
     low: Annotated[float, typer.Option(help="range mode: raw counts mapped to 0")] = 0.0,
     high: Annotated[float, typer.Option(help="range mode: raw counts mapped to 1")] = 1000.0,
     gain: Annotated[float, typer.Option(help="gain mode: raw * gain / 65535")] = 1.0,
@@ -82,7 +85,12 @@ def predict(
         precision=precision,
         io_threads=io_threads,
         normalization=NormalizationConfig(
-            mode=norm, foreground_level=foreground_level, low=low, high=high, gain=gain
+            mode=norm,
+            foreground_level=foreground_level,
+            floor_percentile=floor_percentile or None,
+            low=low,
+            high=high,
+            gain=gain,
         ),
     )
     predict_region(asset, region, out, config, crop_um=crop_um, overwrite=overwrite)
@@ -101,4 +109,40 @@ def qc_predictions(
     from exaspim_axon_segmentation.qc import render_prediction_comparison
 
     render_prediction_comparison(outputs, out, labels=label, slab_um=slab_um)
+    log.info("Wrote %s", out)
+
+
+@app.command()
+def cleanup(
+    prediction: Annotated[str, typer.Argument(help="Probability OME-Zarr written by `predict`")],
+    out: Annotated[str, typer.Option(help="Output category OME-Zarr")],
+    low: Annotated[float, typer.Option(help="Hysteresis low threshold")] = 0.5,
+    high: Annotated[float, typer.Option(help="Hysteresis high threshold")] = 0.9,
+    min_volume_um3: Annotated[float, typer.Option(help="Drop smaller components")] = 2000.0,
+    somata: Annotated[
+        bool, typer.Option(help="Tag components touching detected somata as soma-connected")
+    ] = True,
+    overwrite: Annotated[bool, typer.Option(help="Discard an existing output")] = False,
+) -> None:
+    """Classify probability voxels into kept axon vs. removed (with the reason)."""
+    from exaspim_axon_segmentation.postprocess import CleanupConfig
+    from exaspim_axon_segmentation.postprocess.pipeline import cleanup_prediction
+
+    config = CleanupConfig(
+        low=low, high=high, min_volume_um3=min_volume_um3, remove_soma_connected=somata
+    )
+    cleanup_prediction(prediction, out, config, overwrite=overwrite)
+
+
+@app.command("qc-cleanup")
+def qc_cleanup(
+    prediction: Annotated[str, typer.Argument(help="Probability OME-Zarr")],
+    categories: Annotated[str, typer.Argument(help="Category OME-Zarr from `cleanup`")],
+    out: Annotated[Path, typer.Option(help="Output PNG")] = Path("qc/cleanup.png"),
+    slab_um: Annotated[float, typer.Option(help="MIP slab thickness")] = 48.0,
+) -> None:
+    """Show what the cleanup kept and removed, by reason, against the raw image."""
+    from exaspim_axon_segmentation.qc.cleanup import render_cleanup
+
+    render_cleanup(prediction, categories, out, slab_um=slab_um)
     log.info("Wrote %s", out)

@@ -60,12 +60,17 @@ def estimate_scaling(
     foreground = samples[samples > threshold]
     if foreground.size == 0:
         raise ValueError(f"No voxels above {threshold:.1f} counts in {config.n_samples} samples")
-    signal = float(np.median(foreground)) - background
+    offset = background
+    if config.floor_percentile is not None:
+        offset = max(background, float(np.percentile(samples, config.floor_percentile)))
+    signal = float(np.median(foreground)) - offset
+    if signal <= 0:
+        raise ValueError(f"Noise floor {offset:.1f} is above the foreground median")
     log.info(
-        "Background %.1f counts (sd %.1f); %d foreground voxels, median %.1f counts",
-        background, sigma, foreground.size, signal + background,
+        "Background %.1f counts (sd %.1f), offset %.1f; %d foreground voxels, median %.1f counts",
+        background, sigma, offset, foreground.size, signal + offset,
     )  # fmt: skip
-    return IntensityScaling(offset=background, scale=signal / config.foreground_level)
+    return IntensityScaling(offset=offset, scale=signal / config.foreground_level)
 
 
 def _sample_region(

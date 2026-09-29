@@ -12,7 +12,10 @@
 #
 # Outputs in /results:
 #   <subject>_<regions>_L<level>[_crop<um>]_axon_probability.zarr   uint8 p × 255, OME-NGFF
-#   qc/*_region_overlay.png, qc/*_prediction.png                     visual checks
+#   <subject>_<regions>_L<level>[_crop<um>]_axon_categories.zarr    uint8 cleanup category per voxel
+#                                                                    (1 kept, 2 no core, 3 too small,
+#                                                                     4 soma-connected)
+#   qc/*_region_overlay.png, qc/*_prediction.png, qc/*_cleanup.png   visual checks
 #   predict.log, pip_list.txt, nvidia_smi.txt, SOURCE_COMMIT          provenance
 set -euo pipefail
 
@@ -47,6 +50,7 @@ if [[ "${CROP_UM}" != "0" ]]; then
     tag="${tag}_crop${CROP_UM}"
 fi
 output="${RESULTS}/${tag}_axon_probability.zarr"
+categories="${RESULTS}/${tag}_axon_categories.zarr"
 
 echo "=== ${ASSET} · regions ${REGIONS} · level ${LEVEL} · tile ${TILE_SIZE} × batch ${BATCH_SIZE}"
 exaspim-axon -v qc-region "${ASSET}" "${region_args[@]}" \
@@ -56,4 +60,6 @@ exaspim-axon -v predict "${ASSET}" "${region_args[@]}" --out "${output}" --level
     2>&1 | tee "${RESULTS}/predict.log"
 exaspim-axon -v qc-predictions "${output}" -l "trailmap axon" \
     --out "${RESULTS}/qc/${tag}_prediction.png"
+exaspim-axon -v cleanup "${output}" --out "${categories}" 2>&1 | tee "${RESULTS}/cleanup.log"
+exaspim-axon -v qc-cleanup "${output}" "${categories}" --out "${RESULTS}/qc/${tag}_cleanup.png"
 echo "=== done: ${output}"

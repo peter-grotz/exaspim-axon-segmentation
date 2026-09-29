@@ -14,3 +14,6 @@ qc/
 results/
 *.hdf5
 *.safetensors
+
+# Training traces and derived label volumes (not versioned here)
+data/
