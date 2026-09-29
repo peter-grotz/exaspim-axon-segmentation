@@ -10,10 +10,10 @@ wheels/
 .venv
 
 # Local outputs and downloaded weights
-qc/
-results/
+/qc/
+/results/
 *.hdf5
 *.safetensors
 
 # Training traces and derived label volumes (not versioned here)
-data/
+/data/
