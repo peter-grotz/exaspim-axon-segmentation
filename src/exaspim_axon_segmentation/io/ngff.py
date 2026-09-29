@@ -97,7 +97,7 @@ class NgffImage:
                 scale = np.asarray(transform["scale"][-3:], dtype=float)
             elif transform["type"] == "translation":
                 translation = np.asarray(transform["translation"][-3:], dtype=float)
-        return LevelTransform(tuple(scale), tuple(translation))
+        return LevelTransform(tuple(map(float, scale)), tuple(map(float, translation)))
 
     def array(self, level: int) -> zarr.Array:
         """Raw zarr array (including any leading t/c axes) of a level."""
@@ -116,6 +116,24 @@ class NgffImage:
         box = box or Box.full(self.shape(level))
         leading = (0,) * self._n_leading
         return np.asarray(self.array(level)[leading + box.slices])
+
+    def read_padded(self, level: int, box: Box) -> NDArray:
+        """Read a block that may extend past the volume, edge-padding the outside.
+
+        Edge padding matches TRAILMAP's own handling of volume borders.
+        """
+        shape = self.shape(level)
+        inner = box.clip(shape)
+        block = self.read(level, inner)
+        pad = [
+            (a_in - a, b - b_in)
+            for a, b, a_in, b_in in zip(box.start, box.stop, inner.start, inner.stop, strict=True)
+        ]
+        if not any(p for pair in pad for p in pair):
+            return block
+        if block.size == 0:
+            return np.zeros(box.shape, dtype=block.dtype)
+        return np.pad(block, pad, mode="edge")
 
     def level_for_spacing(self, target_um: float, *, axis: str = "x") -> int:
         """Index of the level whose voxel size along ``axis`` is closest to ``target_um``."""

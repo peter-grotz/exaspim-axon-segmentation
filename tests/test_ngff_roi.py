@@ -56,3 +56,24 @@ def test_region_roi_missing_label(labels_and_image):
     labels_uri, _, _ = labels_and_image
     with pytest.raises(ValueError, match="None of labels"):
         RegionRoi.from_annotation(NgffImage(labels_uri), {99})
+
+
+def test_read_padded_edges(labels_and_image):
+    _, image_uri, _ = labels_and_image
+    image = NgffImage(image_uri)
+    full = image.read(0)
+    block = image.read_padded(0, Box((-2, 0, 10), (3, 4, 14)))
+    expected = np.pad(full[0:3, 0:4, 10:12], ((2, 0), (0, 0), (0, 2)), mode="edge")
+    np.testing.assert_array_equal(block, expected)
+
+
+def test_roi_mask_queries(labels_and_image):
+    labels_uri, image_uri, _ = labels_and_image
+    roi = RegionRoi.from_annotation(NgffImage(labels_uri), {7})
+    grid = NgffImage(image_uri).transforms[0]
+    sampled = roi.sample_on(grid, Box.full((12, 12, 12)))
+    expected = NgffImage(labels_uri).resample_nearest(0, grid, Box.full((12, 12, 12))) == 7
+    np.testing.assert_array_equal(sampled, expected)
+    assert roi.fraction_inside(grid, Box((0, 0, 0), (2, 2, 2))) == 0
+    assert roi.fraction_inside(grid, Box((0, 0, 0), (2, 2, 2)), dilate_um=40) > 0
+    assert roi.fraction_inside(grid, Box((5, 3, 7), (6, 4, 8))) == 1
