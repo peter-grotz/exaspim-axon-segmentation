@@ -116,14 +116,12 @@ def main() -> None:
     post_install.write_text(render_post_install())
     post_install.chmod(0o755)
 
+    # Only git-tracked files, so the vendored copy is exactly the commit named in SOURCE_COMMIT.
     vendored = capsule / "code" / "exaspim-axon-segmentation"
-    for name in PACKAGE_FILES:
-        src = ROOT / name
-        if src.is_dir():
-            shutil.copytree(src, vendored / name, ignore=shutil.ignore_patterns("__pycache__"))
-        else:
-            vendored.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, vendored / name)
+    for rel in git("ls-files", "--", *PACKAGE_FILES).splitlines():
+        dst = vendored / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / rel, dst)
     remote = git("remote", "get-url", "origin")
     (vendored / "SOURCE_COMMIT").write_text(f"{remote}@{commit}\n")
     print(f"Synced {capsule} to {commit[:12]}; review with: git -C {capsule} status")

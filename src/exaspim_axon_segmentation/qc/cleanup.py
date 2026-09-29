@@ -71,18 +71,24 @@ def render_cleanup(
         )
         raw = asset.fused.read(level, slab).max(axis=0).astype(np.float32)
         lo, hi = np.percentile(raw, [1, 99.5])
-        row[0].imshow(np.clip((raw - lo) / max(hi - lo, 1), 0, 1) ** 0.5, cmap="gray", extent=extent)
+        row[0].imshow(
+            np.clip((raw - lo) / max(hi - lo, 1), 0, 1) ** 0.5, cmap="gray", extent=extent
+        )
         outline = roi.sample_on(tf, slab).any(axis=0)
         if outline.any():
             row[0].contour(
                 outline, levels=[0.5], colors=[REGION_COLOR], linewidths=1.0, extent=extent,
                 origin="upper",
             )  # fmt: skip
-        row[1].imshow(prob["0"][z0:z1].max(axis=0) / 255, cmap="magma", vmin=0, vmax=1, extent=extent)
+        row[1].imshow(
+            prob["0"][z0:z1].max(axis=0) / 255, cmap="magma", vmin=0, vmax=1, extent=extent
+        )
         row[2].imshow(_category_mip(cats["0"][z0:z1]), extent=extent)
         z_mm = tf.to_physical(np.array([slab.start[0], 0, 0]))[0] / 1e3
         for ax, title in zip(row, ("raw", "probability", "cleanup"), strict=True):
-            ax.set_title(f"{title} · z {z_mm:.2f} mm + {slab_um:.0f} um mip/", loc="left", fontsize=10)
+            ax.set_title(
+                f"{title} · z {z_mm:.2f} mm + {slab_um:.0f} um mip/", loc="left", fontsize=10
+            )
             ax.set_facecolor("black")
             ax.tick_params(length=0, labelsize=7)
             for spine in ax.spines.values():
@@ -92,9 +98,7 @@ def render_cleanup(
     fig.legend(handles=handles, loc="outside lower center", ncol=4, frameon=False, fontsize=9)
     voxels = summary["voxels"]
     total = sum(v for k, v in voxels.items() if k != "background") or 1
-    shares = " · ".join(
-        f"{LABELS[c]} {100 * voxels[c.name.lower()] / total:.1f}%" for c in LABELS
-    )
+    shares = " · ".join(f"{LABELS[c]} {100 * voxels[c.name.lower()] / total:.1f}%" for c in LABELS)
     fig.suptitle(
         f"{asset.name} · {''.join(provenance['regions'])} · level {level} · cleanup of p > "
         f"{summary['config']['low']:.2f} voxels: {shares}/",
