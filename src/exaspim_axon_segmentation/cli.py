@@ -62,6 +62,8 @@ def predict(
     low: Annotated[float, typer.Option(help="range mode: raw counts mapped to 0")] = 0.0,
     high: Annotated[float, typer.Option(help="range mode: raw counts mapped to 1")] = 1000.0,
     gain: Annotated[float, typer.Option(help="gain mode: raw * gain / 65535")] = 1.0,
+    precision: Annotated[str, typer.Option(help="auto (fp32) | fp32 | bf16 | fp16")] = "auto",
+    io_threads: Annotated[int, typer.Option(help="Parallel S3 tile reads")] = 8,
     crop_um: Annotated[
         float | None, typer.Option(help="Only a cube of this side at the region's core")
     ] = None,
@@ -75,6 +77,8 @@ def predict(
         tile_size=tile_size,
         batch_size=batch_size,
         device=device,
+        precision=precision,
+        io_threads=io_threads,
         normalization=NormalizationConfig(
             mode=norm, foreground_level=foreground_level, low=low, high=high, gain=gain
         ),

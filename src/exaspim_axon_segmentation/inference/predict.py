@@ -41,11 +41,9 @@ def resolve_device(name: str) -> torch.device:
     return device
 
 
-def resolve_precision(name: str, device: torch.device) -> torch.dtype:
-    """``"auto"`` means bf16 autocast on CUDA and fp32 elsewhere."""
-    if name == "auto":
-        return torch.bfloat16 if device.type == "cuda" else torch.float32
-    return _DTYPES[name]
+def resolve_precision(name: str) -> torch.dtype:
+    """``"auto"`` means fp32 until reduced precision has been validated against the reference."""
+    return torch.float32 if name == "auto" else _DTYPES[name]
 
 
 class TilePredictor:
@@ -61,6 +59,8 @@ class TilePredictor:
         Autocast dtype (``torch.float32`` disables autocast).
     compile : bool, default False
         Wrap the model with ``torch.compile``.
+    allow_tf32 : bool, default False
+        Let CUDA use TF32 for fp32 convolutions (faster, ~1e-3 relative error).
     """
 
     def __init__(
@@ -70,9 +70,14 @@ class TilePredictor:
         precision: torch.dtype,
         *,
         compile: bool = False,
+        allow_tf32: bool = False,
     ) -> None:
         self.device = device
         self.precision = precision
+        if device.type == "cuda":
+            torch.backends.cudnn.allow_tf32 = allow_tf32
+            torch.backends.cuda.matmul.allow_tf32 = allow_tf32
+            torch.backends.cudnn.benchmark = True
         self.model = model.to(device).eval()
         self._forward = torch.compile(self.model) if compile else self.model
 
@@ -89,7 +94,7 @@ class TilePredictor:
             y = self._forward(x)
         return y.squeeze(1).float().cpu().numpy()
 
-    def self_check(self, batch_size: int, *, side: int = 64, atol: float = 2e-3) -> float:
+    def self_check(self, batch_size: int, *, side: int = 64, atol: float | None = None) -> float:
         """Compare this device against a CPU fp32 copy of the model; raise if they disagree.
 
         Cheap (``side``³ inputs) and catches broken device kernels before any tile is written.
@@ -97,6 +102,7 @@ class TilePredictor:
         """
         if self.device.type == "cpu" and self.precision == torch.float32:
             return 0.0
+        atol = atol if atol is not None else (2e-3 if self.precision == torch.float32 else 5e-2)
         reference = copy.deepcopy(self.model).to("cpu").float().eval()
         generator = torch.Generator().manual_seed(0)
         x = torch.rand((batch_size, side, side, side), generator=generator) ** 8

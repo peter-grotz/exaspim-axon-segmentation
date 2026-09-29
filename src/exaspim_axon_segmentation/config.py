@@ -56,6 +56,7 @@ class InferenceConfig(_Frozen):
     device: str = Field("auto", description="auto | cuda | cuda:N | mps | cpu")
     precision: Literal["auto", "fp32", "bf16", "fp16"] = "auto"
     compile: bool = False
+    allow_tf32: bool = False
     mask_dilation_um: float = Field(50.0, ge=0, description="Keep tiles this close to the region")
     io_threads: int = Field(8, ge=1)
     normalization: NormalizationConfig = NormalizationConfig()

@@ -104,10 +104,12 @@ def predict_region(
     log.info("Intensity scaling: offset %.1f, scale %.1f", scaling.offset, scaling.scale)
 
     device = resolve_device(config.device)
-    precision = resolve_precision(config.precision, device)
+    precision = resolve_precision(config.precision)
     log.info("Device %s, precision %s", device, precision)
     model = REGISTRY[config.weights].load()
-    predictor = TilePredictor(model, device, precision, compile=config.compile)
+    predictor = TilePredictor(
+        model, device, precision, compile=config.compile, allow_tf32=config.allow_tf32
+    )
     predictor.self_check(config.batch_size)
 
     source = asset.fused.transforms[config.level]
