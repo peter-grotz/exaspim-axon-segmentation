@@ -4,7 +4,8 @@ Usage::
 
     uv run python scripts/sync_capsule.py <path to a git clone of the capsule>
 
-The capsule's working tree is replaced (``.git`` and ``.codeocean/secrets.json`` are kept); review
+The capsule's working tree is replaced except for ``KEEP``: git metadata, Code Ocean secrets and
+data-asset attachments (managed in the Code Ocean UI), and notebooks in ``code/``. Review
 ``git -C <capsule> diff`` and commit/push there. Requires a clean, pushed package working tree so
 ``SOURCE_COMMIT`` names a commit that exists on GitHub.
 """
@@ -15,6 +16,7 @@ import argparse
 import shutil
 import subprocess
 import sys
+from fnmatch import fnmatch
 from pathlib import Path
 
 from exaspim_axon_segmentation.io.ontology import STRUCTURE_GRAPH_URL
@@ -23,7 +25,7 @@ from exaspim_axon_segmentation.model import REGISTRY
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "capsule"
 PACKAGE_FILES = ["pyproject.toml", "uv.lock", "README.md", "LICENSE", "src"]
-KEEP = {".git", ".codeocean/secrets.json"}
+KEEP = (".git", ".codeocean/secrets.json", ".codeocean/datasets.json", "code/*.ipynb")
 WEIGHTS = "trailmap-axon-210409"
 
 
@@ -46,7 +48,7 @@ def require_clean_and_pushed() -> str:
 
 
 def _kept(rel: str) -> bool:
-    return any(rel == k or rel.startswith(f"{k}/") for k in KEEP)
+    return any(fnmatch(rel, k) or rel.startswith(f"{k}/") for k in KEEP)
 
 
 def clear(capsule: Path) -> None:
