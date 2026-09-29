@@ -33,11 +33,12 @@ class NormalizationConfig(_Frozen):
     foreground_min_counts: float = Field(10.0, ge=0)
     foreground_level: float = Field(0.25, gt=0, le=1)
     floor_percentile: float | None = Field(
-        98.0,
+        None,
         gt=50,
         lt=100,
         description="foreground mode: raise the offset to this percentile of sampled voxels, so "
-        "quantized background texture maps to exactly 0 (the network responds to it otherwise)",
+        "quantized background texture maps to 0. Off by default: a global floor that removes "
+        "texture (98th pct, ~10 counts on 851474 MD) also erases real fibres in dim tiles.",
     )
     low: float = Field(0.0, ge=0)
     high: float = Field(1000.0, gt=0)

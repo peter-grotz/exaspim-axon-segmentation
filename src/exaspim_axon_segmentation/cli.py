@@ -62,8 +62,8 @@ def predict(
         float, typer.Option(help="foreground mode: input value of the median foreground voxel")
     ] = 0.25,
     floor_percentile: Annotated[
-        float, typer.Option(help="foreground mode: noise-floor percentile; 0 disables")
-    ] = 98.0,
+        float, typer.Option(help="foreground mode: noise-floor percentile (e.g. 98); 0 = off")
+    ] = 0.0,
     low: Annotated[float, typer.Option(help="range mode: raw counts mapped to 0")] = 0.0,
     high: Annotated[float, typer.Option(help="range mode: raw counts mapped to 1")] = 1000.0,
     gain: Annotated[float, typer.Option(help="gain mode: raw * gain / 65535")] = 1.0,
