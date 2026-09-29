@@ -58,9 +58,14 @@ class Swc:
 
 def read_swc(path: Path | str) -> Swc:
     """Read an SWC file, applying any ``# OFFSET`` header."""
+    return parse_swc(Path(path).read_text())
+
+
+def parse_swc(text: str) -> Swc:
+    """Parse SWC text, applying any ``# OFFSET`` header."""
     offset = np.zeros(3)
     header, rows = [], []
-    for line in Path(path).read_text().splitlines():
+    for line in text.splitlines():
         if line.startswith("#"):
             header.append(line)
             if line.upper().startswith("# OFFSET"):

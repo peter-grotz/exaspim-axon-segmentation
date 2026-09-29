@@ -53,7 +53,26 @@ def estimate_scaling(
         return IntensityScaling(offset=0.0, scale=UINT16_MAX / config.gain)
     if config.mode == "range":
         return IntensityScaling(offset=config.low, scale=config.high - config.low)
-    samples = _sample_region(image, level, roi, config).astype(np.float64)
+    return scaling_from_samples(_sample_region(image, level, roi, config), config)
+
+
+def estimate_scaling_array(
+    raw: NDArray, inside: NDArray[np.bool_], config: NormalizationConfig
+) -> IntensityScaling:
+    """Estimate :func:`estimate_scaling` from patches of an in-memory volume inside a mask."""
+    rng = np.random.default_rng(config.seed)
+    candidates = np.argwhere(inside[::4, ::4, ::4]) * 4
+    picks = candidates[rng.choice(len(candidates), size=config.n_samples)]
+    half = config.sample_size // 2
+    blocks = [
+        raw[tuple(slice(max(c - half, 0), c + half) for c in center)].ravel() for center in picks
+    ]
+    return scaling_from_samples(np.concatenate(blocks), config)
+
+
+def scaling_from_samples(samples: NDArray, config: NormalizationConfig) -> IntensityScaling:
+    """Foreground-mode scaling from sampled raw voxels (see :class:`NormalizationConfig`)."""
+    samples = samples.astype(np.float64)
     background = float(np.median(samples))
     sigma = 1.4826 * float(np.median(np.abs(samples - background)))
     threshold = background + max(config.foreground_mads * sigma, config.foreground_min_counts)

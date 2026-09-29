@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "connected-components-3d>=3.18",
+    "gcsfs>=2025.3",
     "h5py>=3.12",
     "huggingface-hub>=0.30",
     "matplotlib>=3.9",

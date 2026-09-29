@@ -72,12 +72,16 @@ def predict(
     crop_um: Annotated[
         float | None, typer.Option(help="Only a cube of this side at the region's core")
     ] = None,
+    weights: Annotated[
+        str, typer.Option(help="Registered weights name or fine-tuned .safetensors path")
+    ] = "trailmap-axon-210409",
     overwrite: Annotated[bool, typer.Option(help="Discard an existing output")] = False,
 ) -> None:
     """Segment axons within CCF regions and write a probability OME-Zarr."""
     from exaspim_axon_segmentation.inference import predict_region
 
     config = InferenceConfig(
+        weights=weights,
         level=level,
         tile_size=tile_size,
         batch_size=batch_size,
@@ -146,3 +150,77 @@ def qc_cleanup(
 
     render_cleanup(prediction, categories, out, slab_um=slab_um)
     log.info("Wrote %s", out)
+
+
+@app.command("make-labels")
+def make_labels(
+    asset: AssetArg,
+    region: RegionOpt,
+    swc: Annotated[
+        list[Path], typer.Option("--swc", help="Complete traces for the region; repeat")
+    ],
+    out: Annotated[Path, typer.Option(help="Output directory (raw.zarr + labels.zarr)")],
+    level: Annotated[int, typer.Option(help="fused.zarr pyramid level (match inference)")] = 2,
+) -> None:
+    """Build a training volume from complete SWC traces of a region's traced lobe."""
+    from exaspim_axon_segmentation.train.volume import make_training_volume
+
+    info = make_training_volume(asset, region, swc, out, level=level)
+    log.info("Labels: %s", info["voxels"])
+
+
+@app.command()
+def finetune(
+    volume: Annotated[
+        list[Path], typer.Option("--volume", help="Training volume directory; repeat")
+    ],
+    out: Annotated[Path, typer.Option(help="Output directory for checkpoints and metrics")],
+    holdout_brain: Annotated[
+        list[str] | None, typer.Option(help="Brain ID whose blocks are validation only; repeat")
+    ] = None,
+    region_share: Annotated[
+        float, typer.Option(help="Fraction of training patches from region volumes")
+    ] = 0.5,
+    weights: Annotated[str, typer.Option(help="Starting weights (name or .safetensors)")] = (
+        "trailmap-axon-210409"
+    ),
+    steps: Annotated[int, typer.Option()] = 4000,
+    batch_size: Annotated[int, typer.Option()] = 4,
+    input_size: Annotated[int, typer.Option(help="Patch side (multiple of 8)")] = 96,
+    lr: Annotated[float, typer.Option()] = 1e-4,
+    max_minutes: Annotated[float, typer.Option(help="Stop training after this long")] = 40.0,
+    device: Annotated[str, typer.Option(help="auto | cuda | cpu")] = "auto",
+) -> None:
+    """Fine-tune on region volumes (spatially split) and traced blocks (held out by brain)."""
+    from exaspim_axon_segmentation.inference.predict import resolve_device
+    from exaspim_axon_segmentation.model import load_model
+    from exaspim_axon_segmentation.train.trainer import TrainConfig, build_volumes
+    from exaspim_axon_segmentation.train.trainer import finetune as run_finetune
+
+    config = TrainConfig(
+        input_size=input_size, batch_size=batch_size, steps=steps, lr=lr, max_minutes=max_minutes
+    )
+    volumes = build_volumes(
+        volume, config, holdout_brains=holdout_brain or [], region_share=region_share
+    )
+    run_finetune(load_model(weights), volumes, out, config, device=resolve_device(device))
+
+
+@app.command("make-block-volumes")
+def make_block_volumes_cmd(
+    root: Annotated[str, typer.Argument(help="gs://.../training-data_<date> root")],
+    out: Annotated[Path, typer.Option(help="Output directory (one volume per block)")],
+    level: Annotated[int, typer.Option(help="Block pyramid level (match inference)")] = 2,
+    key_env: Annotated[
+        str, typer.Option(help="Environment variable holding the GCS service-account JSON")
+    ] = "CUSTOM_KEY",
+    key_file: Annotated[Path | None, typer.Option(help="Key file instead of --key-env")] = None,
+) -> None:
+    """Build training volumes from completely traced GCS blocks (SWC + fill masks)."""
+    from exaspim_axon_segmentation.io.gcs import gcs_token
+    from exaspim_axon_segmentation.train.blocks import make_block_volumes
+
+    records = make_block_volumes(
+        root, out, token=gcs_token(env=key_env, path=key_file), level=level
+    )
+    log.info("Built %d block volumes from %s", len(records), sorted({r["brain"] for r in records}))
