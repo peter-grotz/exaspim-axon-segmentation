@@ -262,6 +262,9 @@ def skeletonize(
     spur_um: Annotated[
         float, typer.Option(help="Prune terminal branches shorter than this")
     ] = 10.0,
+    min_piece_um: Annotated[
+        float, typer.Option(help="Drop connected skeleton pieces shorter than this")
+    ] = 30.0,
     swc: Annotated[
         list[Path] | None, typer.Option("--swc", help="Complete traces to score against; repeat")
     ] = None,
@@ -276,7 +279,11 @@ def skeletonize(
     from exaspim_axon_segmentation.postprocess.skeleton import SkeletonConfig
 
     config = SkeletonConfig(
-        threshold=threshold, core=core, min_volume_um3=min_volume_um3, spur_um=spur_um
+        threshold=threshold,
+        core=core,
+        min_volume_um3=min_volume_um3,
+        spur_um=spur_um,
+        min_piece_um=min_piece_um,
     )
     summary = skeletonize_prediction(prediction, out, config)
     if swc:

@@ -40,6 +40,10 @@ class SkeletonConfig:
         Terminal branches shorter than this are pruned (repeated ``prune_rounds`` times).
     prune_rounds : int
         Pruning passes; each pass can expose new short terminals.
+    min_piece_um : float
+        Connected skeleton pieces shorter than this are dropped. Removes short fragments on
+        faint texture: on 822178 MD, 30 µm cut untraced-lobe skeleton 313 → 109 mm while held-out
+        trace recall stayed at 0.88.
     """
 
     threshold: float = 0.2
@@ -47,6 +51,7 @@ class SkeletonConfig:
     min_volume_um3: float = 100.0
     spur_um: float = 10.0
     prune_rounds: int = 2
+    min_piece_um: float = 30.0
 
 
 @dataclass(frozen=True, eq=False)
@@ -162,8 +167,9 @@ def skeletonize_probability(
     graph = skeleton.graph.tocoo()
     upper = graph.row < graph.col
     edges = np.stack([graph.row[upper], graph.col[upper]], axis=1).astype(np.int64)
+    coordinates, edges, index = _drop_short_pieces(coordinates, edges, config.min_piece_um)
     final = np.zeros(mask.shape, dtype=bool)
-    final[tuple(np.round(skeleton.coordinates).astype(int).T)] = True
+    final[tuple(np.round(skeleton.coordinates[index]).astype(int).T)] = True
     result = AxonSkeleton(final, coordinates, edges, config)
     log.info("Skeleton: %d nodes, %.1f mm total length", len(coordinates), result.length_um / 1e3)
     return result
@@ -176,3 +182,20 @@ def _adjacency(edges: NDArray[np.int64], n: int):
     rows = np.concatenate([edges[:, 0], edges[:, 1]])
     cols = np.concatenate([edges[:, 1], edges[:, 0]])
     return coo_matrix((data, (rows, cols)), shape=(n, n)).tocsr()
+
+
+def _drop_short_pieces(
+    coordinates: NDArray[np.float64], edges: NDArray[np.int64], min_um: float
+) -> tuple[NDArray[np.float64], NDArray[np.int64], NDArray[np.int64]]:
+    """Remove connected pieces shorter than ``min_um``; returns kept coords, edges, node index."""
+    n = len(coordinates)
+    if min_um <= 0 or n == 0:
+        return coordinates, edges, np.arange(n)
+    _, piece = connected_components(_adjacency(edges, n), directed=False)
+    lengths = np.linalg.norm(coordinates[edges[:, 0]] - coordinates[edges[:, 1]], axis=1)
+    piece_length = np.bincount(piece[edges[:, 0]], weights=lengths, minlength=piece.max() + 1)
+    keep = np.flatnonzero(piece_length[piece] >= min_um)
+    remap = np.full(n, -1, dtype=np.int64)
+    remap[keep] = np.arange(len(keep))
+    kept_edges = remap[edges]
+    return coordinates[keep], kept_edges[(kept_edges >= 0).all(axis=1)], keep

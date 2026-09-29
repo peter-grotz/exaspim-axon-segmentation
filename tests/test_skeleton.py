@@ -29,3 +29,15 @@ def test_skeleton_length_pruning_and_swc(tmp_path):
     assert len(swc.ids) == len(skel.coordinates_um)
     assert (swc.parents == -1).sum() == 1  # one connected piece
     assert np.isclose(swc.path_length_um(), skel.length_um, rtol=1e-6)
+
+
+def test_min_piece_drops_short_isolated_fragments():
+    p = _probability()
+    p[25, 5:9, 100] = 230  # isolated 4-voxel (~12 um) fragment
+    region = Box((0, 0, 0), p.shape)
+    kept = skeletonize_probability(p, GRID, region, SkeletonConfig(min_piece_um=30.0))
+    assert not kept.voxels[25, 5:9, 100].any()
+    loose = skeletonize_probability(
+        p, GRID, region, SkeletonConfig(min_piece_um=0.0, min_volume_um3=0)
+    )
+    assert loose.voxels[25, 5:9, 100].any()
