@@ -161,11 +161,16 @@ def make_labels(
     ],
     out: Annotated[Path, typer.Option(help="Output directory (raw.zarr + labels.zarr)")],
     level: Annotated[int, typer.Option(help="fused.zarr pyramid level (match inference)")] = 2,
+    envelope_um: Annotated[
+        float | None, typer.Option(help="Label only within this distance of the traces")
+    ] = None,
 ) -> None:
     """Build a training volume from complete SWC traces of a region's traced lobe."""
+    from exaspim_axon_segmentation.train.labels import LabelConfig
     from exaspim_axon_segmentation.train.volume import make_training_volume
 
-    info = make_training_volume(asset, region, swc, out, level=level)
+    config = LabelConfig(envelope_um=envelope_um)
+    info = make_training_volume(asset, region, swc, out, level=level, config=config)
     log.info("Labels: %s", info["voxels"])
 
 

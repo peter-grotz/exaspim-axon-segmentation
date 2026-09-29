@@ -59,3 +59,25 @@ def test_finetune_smoke(tmp_path):
     assert {"region/f1", "heldout-b/f1", "mean_f1"} <= set(lines[0])
     assert (tmp_path / "best.safetensors").exists() and (tmp_path / "last.safetensors").exists()
     assert summary["steps_run"] == 2
+
+
+def test_label_envelope_ignores_far_voxels():
+    from exaspim_axon_segmentation.io import Box, LevelTransform
+    from exaspim_axon_segmentation.train.labels import LabelConfig, build_labels
+
+    class Image:  # minimal stand-in for NgffImage
+        transforms = (LevelTransform((4.0, 3.0, 3.0), (0.0, 0.0, 0.0)),)
+
+        def read(self, level, box):
+            image = np.full(box.shape, 5, dtype=np.uint16)
+            image[10, 30, :] = 100  # the traced axon
+            return image
+
+    points = np.array([[40.0, 30.0 * 3.0, x * 3.0] for x in np.arange(0, 60, 0.3)])
+    box = Box.full((20, 60, 60))
+    labels, _, _ = build_labels(
+        Image(), 0, box, np.ones(box.shape, bool), points, LabelConfig(envelope_um=15.0)
+    )
+    assert labels[10, 30, 30] == Label.AXON
+    assert labels[10, 30 + 3, 30] == Label.BACKGROUND  # 9 um away: inside the envelope
+    assert labels[10, 55, 30] == Label.IGNORE  # 75 um away
