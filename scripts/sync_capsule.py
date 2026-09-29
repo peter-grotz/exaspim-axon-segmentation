@@ -68,8 +68,12 @@ def clear(capsule: Path) -> None:
             path.rmdir()
 
 
-def render_post_install(commit: str) -> str:
-    """Fill the postInstall template with pinned requirements and weight coordinates."""
+def render_post_install() -> str:
+    """Fill the postInstall template with pinned requirements and weight coordinates.
+
+    Deliberately independent of the package commit, so the image only rebuilds when
+    dependencies, weights, or the template change.
+    """
     requirements = subprocess.run(
         ["uv", "export", "--frozen", "--no-dev", "--no-hashes", "--no-emit-project"],
         cwd=ROOT, check=True, capture_output=True, text=True,
@@ -77,7 +81,6 @@ def render_post_install(commit: str) -> str:
     pins = "\n".join(line for line in requirements.splitlines() if line and line[0] not in "# ")
     weights = REGISTRY[WEIGHTS]
     replacements = {
-        "@COMMIT@": commit[:12],
         "@REQUIREMENTS@": pins,
         "@HF_REPO@": weights.repo_id,
         "@HF_FILE@": weights.filename,
@@ -108,7 +111,7 @@ def main() -> None:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
     post_install = capsule / "environment" / "postInstall"
-    post_install.write_text(render_post_install(commit))
+    post_install.write_text(render_post_install())
     post_install.chmod(0o755)
 
     vendored = capsule / "code" / "exaspim-axon-segmentation"
