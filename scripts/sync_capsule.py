@@ -40,7 +40,7 @@ def require_clean_and_pushed() -> str:
         sys.exit("Package working tree is dirty; commit first.")
     head = git("rev-parse", "HEAD")
     git("fetch", "--quiet")
-    if head not in git("branch", "-r", "--contains", head):
+    if not git("branch", "-r", "--contains", head):
         sys.exit(f"{head[:8]} is not pushed; push first.")
     return head
 
