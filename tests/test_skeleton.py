@@ -47,10 +47,24 @@ def test_speckle_removal_drops_short_single_plane_pieces_only():
     p = _probability()
     p[25, 5:17, 100] = 230  # ~36 um fragment confined to one z-plane: speckle
     region = Box((0, 0, 0), p.shape)
-    off = SkeletonConfig(min_volume_um3=0, speckle_max_um=0.0)
-    on = SkeletonConfig(min_volume_um3=0, speckle_max_um=60.0)
+    off = SkeletonConfig(min_volume_um3=0, min_piece_um=30.0, speckle_max_um=0.0)
+    on = SkeletonConfig(min_volume_um3=0, min_piece_um=30.0, speckle_max_um=60.0)
     assert skeletonize_probability(p, GRID, region, off).voxels[25, 5:17, 100].any()
     kept = skeletonize_probability(p, GRID, region, on)
     assert not kept.voxels[25, 5:17, 100].any()
     # the 300 um tube thins to a single-plane centerline but is long, so it survives
     assert kept.length_um > 300
+
+
+def test_bridging_joins_aligned_gap_into_one_cable():
+    p = np.zeros((20, 30, 200), dtype=np.uint8)
+    p[9:12, 14:17, 10:60] = 230  # 150 um
+    p[9:12, 14:17, 66:116] = 230  # 150 um, after an 18 um gap on the same line
+    p[9:12, 2:5, 150:170] = 230  # short parallel piece far away
+    region = Box((0, 0, 0), p.shape)
+    joined = skeletonize_probability(p, GRID, region, SkeletonConfig(min_piece_um=250.0))
+    assert joined.length_um > 250  # the two halves count as one cable and survive
+    apart = skeletonize_probability(
+        p, GRID, region, SkeletonConfig(min_piece_um=250.0, bridge_um=0)
+    )
+    assert apart.length_um == 0

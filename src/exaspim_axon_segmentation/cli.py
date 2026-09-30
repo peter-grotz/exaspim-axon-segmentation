@@ -262,9 +262,12 @@ def skeletonize(
     spur_um: Annotated[
         float, typer.Option(help="Prune terminal branches shorter than this")
     ] = 10.0,
-    min_piece_um: Annotated[
-        float, typer.Option(help="Drop connected skeleton pieces shorter than this")
+    bridge_um: Annotated[
+        float, typer.Option(help="Reconnect aligned piece tips across gaps up to this; 0 = off")
     ] = 30.0,
+    min_piece_um: Annotated[
+        float, typer.Option(help="Minimum cable length (after bridging)")
+    ] = 100.0,
     speckle_max_um: Annotated[
         float, typer.Option(help="Speckle removal: drop single-plane pieces shorter than this")
     ] = 60.0,
@@ -286,6 +289,7 @@ def skeletonize(
         core=core,
         min_volume_um3=min_volume_um3,
         spur_um=spur_um,
+        bridge_um=bridge_um,
         min_piece_um=min_piece_um,
         speckle_max_um=speckle_max_um,
     )

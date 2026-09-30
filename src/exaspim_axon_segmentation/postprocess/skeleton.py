@@ -15,6 +15,7 @@ import cc3d
 import numpy as np
 from numpy.typing import NDArray
 from scipy.sparse.csgraph import breadth_first_order, connected_components
+from scipy.spatial import cKDTree
 from skan import Skeleton, summarize
 from skimage.morphology import skeletonize
 
@@ -40,10 +41,18 @@ class SkeletonConfig:
         Terminal branches shorter than this are pruned (repeated ``prune_rounds`` times).
     prune_rounds : int
         Pruning passes; each pass can expose new short terminals.
+    bridge_um : float
+        Before length filtering, reconnect skeleton tips from different pieces that are within
+        this distance and point toward each other (both tip directions within
+        ``arccos(bridge_min_cos)`` of the gap), so a real axon broken where it dims is measured as
+        one cable. Set 0 to disable.
+    bridge_min_cos : float
+        Alignment required for a bridge (0.7 ≈ within 45°).
     min_piece_um : float
-        Connected skeleton pieces shorter than this are dropped. Removes short fragments on
-        faint texture: on 822178 MD, 30 µm cut untraced-lobe skeleton 313 → 109 mm while held-out
-        trace recall stayed at 0.88.
+        Minimum cable length: connected pieces (after bridging) shorter than this are dropped.
+        On 822178 MD's traced lobe, 30 µm bridging + 100 µm minimum cut pieces 27.5k → 107 and
+        off-trace skeleton 200 → 29 mm, at held-out trace recall 0.92 (0.93 unfiltered) and
+        precision 0.92 near traces.
     speckle_max_um : float
         Speckle removal: connected pieces confined to a single z-plane *and* shorter than this are
         dropped. In-plane speckle (median 4 µm; 80k of 146k pieces on 822178 MD, none ≥ 60 µm) is
@@ -57,7 +66,9 @@ class SkeletonConfig:
     min_volume_um3: float = 100.0
     spur_um: float = 10.0
     prune_rounds: int = 2
-    min_piece_um: float = 30.0
+    bridge_um: float = 30.0
+    bridge_min_cos: float = 0.7
+    min_piece_um: float = 100.0
     speckle_max_um: float = 60.0
 
 
@@ -174,6 +185,7 @@ def skeletonize_probability(
     graph = skeleton.graph.tocoo()
     upper = graph.row < graph.col
     edges = np.stack([graph.row[upper], graph.col[upper]], axis=1).astype(np.int64)
+    edges = _bridge_gaps(coordinates, edges, config.bridge_um, config.bridge_min_cos)
     coordinates, edges, index = _drop_small_pieces(
         coordinates, edges, config.min_piece_um, config.speckle_max_um, float(scale[0])
     )
@@ -222,3 +234,50 @@ def _drop_small_pieces(
     remap[keep] = np.arange(len(keep))
     kept_edges = remap[edges]
     return coordinates[keep], kept_edges[(kept_edges >= 0).all(axis=1)], keep
+
+
+def _bridge_gaps(
+    coordinates: NDArray[np.float64], edges: NDArray[np.int64], gap_um: float, min_cos: float
+) -> NDArray[np.int64]:
+    """Add edges joining aligned tips of different pieces across gaps of at most ``gap_um``."""
+    n = len(coordinates)
+    if gap_um <= 0 or n == 0:
+        return edges
+    graph = _adjacency(edges, n)
+    _, piece = connected_components(graph, directed=False)
+    degree = np.asarray(graph.sum(axis=1)).ravel()
+    tips = np.flatnonzero(degree == 1)
+    if len(tips) < 2:
+        return edges
+    directions = np.array([_tip_direction(graph, coordinates, tip) for tip in tips])
+    bridges = []
+    for i, j in cKDTree(coordinates[tips]).query_pairs(gap_um):
+        a, b = tips[i], tips[j]
+        if piece[a] == piece[b]:
+            continue
+        gap = coordinates[b] - coordinates[a]
+        distance = np.linalg.norm(gap)
+        if distance == 0:
+            bridges.append((a, b))
+            continue
+        unit = gap / distance
+        if directions[i] @ unit >= min_cos and directions[j] @ -unit >= min_cos:
+            bridges.append((a, b))
+    log.info("Bridged %d gaps (≤ %.0f µm)", len(bridges), gap_um)
+    if not bridges:
+        return edges
+    return np.concatenate([edges, np.asarray(bridges, dtype=np.int64)])
+
+
+def _tip_direction(graph, coordinates: NDArray[np.float64], tip: int, steps: int = 3) -> NDArray:
+    """Return the unit vector out of a tip, from the node ``steps`` along the cable into it."""
+    previous, current = -1, tip
+    for _ in range(steps):
+        neighbors = [k for k in graph.indices[graph.indptr[current] : graph.indptr[current + 1]]
+                     if k != previous]  # fmt: skip
+        if not neighbors:
+            break
+        previous, current = current, neighbors[0]
+    vector = coordinates[tip] - coordinates[current]
+    norm = np.linalg.norm(vector)
+    return vector / norm if norm else vector
