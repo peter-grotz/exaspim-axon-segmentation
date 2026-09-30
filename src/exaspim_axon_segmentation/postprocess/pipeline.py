@@ -97,6 +97,7 @@ def skeletonize_prediction(
         "nodes": len(skeleton.coordinates_um),
         "length_um": skeleton.length_um,
         "length_in_region_um": skeleton.length_inside_um(inside, grid, sub),
+        "gap_filled_length_um": skeleton.filled_length_um,
         "region_volume_mm3": float(inside.sum() * np.prod(grid.scale) * 1e-9),
     }
     summary["density_mm_per_mm3"] = (

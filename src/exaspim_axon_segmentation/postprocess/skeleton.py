@@ -2,7 +2,8 @@
 
 Pipeline: threshold → hysteresis (keep components with a confident core) → drop specks →
 per-component 3D thinning → branch graph (``skan``) on the anisotropic grid → prune short spurs
-(thinning artefacts) → SWC forest + summary.
+(thinning artefacts) → bridge aligned gaps → keep long, non-isolated cable → connect the cable
+along the probability map → SWC forest + summary.
 """
 
 from __future__ import annotations
@@ -61,6 +62,17 @@ class SkeletonConfig:
         distance of 320 µm. Set 0 to disable.
     attach_um : float
         How close a shorter piece must come to anchor cable to be kept.
+    connect_um : float
+        Final gap filling on the kept cable: each tip joins the nearest node of another piece
+        within this distance and within ``arccos(connect_min_cos)`` of the tip's direction (end to
+        end, or end onto the side of a branch), along the brightest path through the probability
+        map. Set 0 to disable.
+    connect_min_cos : float
+        Direction tolerance of a connection (0.5 ≈ within 60° of the tip's direction).
+    connect_min_p : float
+        A connection is rejected if any voxel along its path is below this probability, i.e. if it
+        crosses background rather than a dim stretch of neurite. On 822178 MD, joins that
+        disagreed with the traces mostly crossed p < 0.05 or detoured (> 1.3 × the gap).
     speckle_max_um : float
         Speckle removal: connected pieces confined to a single z-plane *and* shorter than this are
         dropped. In-plane speckle (median 4 µm; 80k of 146k pieces on 822178 MD, none ≥ 60 µm) is
@@ -79,6 +91,9 @@ class SkeletonConfig:
     min_piece_um: float = 100.0
     anchor_um: float = 500.0
     attach_um: float = 50.0
+    connect_um: float = 50.0
+    connect_min_cos: float = 0.5
+    connect_min_p: float = 0.05
     speckle_max_um: float = 60.0
 
 
@@ -96,12 +111,21 @@ class AxonSkeleton:
         Node index pairs of the skeleton graph.
     config : SkeletonConfig
         Settings used.
+    filled : numpy.ndarray of bool, shape (n,)
+        Nodes added by gap bridging / connection rather than thinning.
     """
 
     voxels: NDArray[np.bool_]
     coordinates_um: NDArray[np.float64]
     edges: NDArray[np.int64]
     config: SkeletonConfig
+    filled: NDArray[np.bool_]
+
+    @property
+    def filled_length_um(self) -> float:
+        """Length of edges touching gap-filled nodes."""
+        touches = self.filled[self.edges[:, 0]] | self.filled[self.edges[:, 1]]
+        return float(self.edge_lengths_um[touches].sum())
 
     @property
     def edge_lengths_um(self) -> NDArray[np.float64]:
@@ -189,24 +213,37 @@ def skeletonize_probability(
         if spurs.size == 0:
             break
         skeleton = skeleton.prune_paths(spurs)
-    coordinates = skeleton.coordinates * scale + (
-        np.asarray(region.start) * scale + grid.translation
-    )
+    origin = np.asarray(region.start) * scale + np.asarray(grid.translation)
+    voxel = np.round(skeleton.coordinates).astype(np.int64)
     graph = skeleton.graph.tocoo()
     upper = graph.row < graph.col
     edges = np.stack([graph.row[upper], graph.col[upper]], axis=1).astype(np.int64)
-    edges = _bridge_gaps(coordinates, edges, config.bridge_um, config.bridge_min_cos)
-    coordinates, edges, index = _drop_small_pieces(
-        coordinates, edges, config.min_piece_um, config.speckle_max_um, float(scale[0])
+    filled = np.zeros(len(voxel), dtype=bool)
+
+    # Bridge aligned tip-to-tip gaps so an axon broken where it dims is measured as one cable.
+    voxel, edges, filled = _join_pieces(
+        voxel, edges, filled, probability, scale,
+        gap_um=config.bridge_um, min_cos=config.bridge_min_cos, mutual=True, min_p=0.0,
+    )  # fmt: skip
+    _, edges, keep = _drop_small_pieces(
+        voxel * scale, edges, config.min_piece_um, config.speckle_max_um, float(scale[0])
     )
-    coordinates, edges, kept = _drop_isolated_pieces(
-        coordinates, edges, config.anchor_um, config.attach_um
-    )
-    index = index[kept]
+    voxel, filled = voxel[keep], filled[keep]
+    _, edges, keep = _drop_isolated_pieces(voxel * scale, edges, config.anchor_um, config.attach_um)
+    voxel, filled = voxel[keep], filled[keep]
+    # Connect what is left: ends onto the continuing cable, along the probability map.
+    voxel, edges, filled = _join_pieces(
+        voxel, edges, filled, probability, scale, gap_um=config.connect_um,
+        min_cos=config.connect_min_cos, mutual=False, min_p=config.connect_min_p,
+    )  # fmt: skip
+
     final = np.zeros(mask.shape, dtype=bool)
-    final[tuple(np.round(skeleton.coordinates[index]).astype(int).T)] = True
-    result = AxonSkeleton(final, coordinates, edges, config)
-    log.info("Skeleton: %d nodes, %.1f mm total length", len(coordinates), result.length_um / 1e3)
+    final[tuple(voxel.T)] = True
+    result = AxonSkeleton(final, voxel * scale + origin, edges, config, filled)
+    log.info(
+        "Skeleton: %d nodes, %.1f mm total length (%.1f mm gap-filled)",
+        len(voxel), result.length_um / 1e3, result.filled_length_um / 1e3,
+    )  # fmt: skip
     return result
 
 
@@ -281,37 +318,116 @@ def _drop_isolated_pieces(
     return coordinates[keep], kept_edges[(kept_edges >= 0).all(axis=1)], keep
 
 
-def _bridge_gaps(
-    coordinates: NDArray[np.float64], edges: NDArray[np.int64], gap_um: float, min_cos: float
-) -> NDArray[np.int64]:
-    """Add edges joining aligned tips of different pieces across gaps of at most ``gap_um``."""
-    n = len(coordinates)
+def _join_pieces(
+    voxel: NDArray[np.int64],
+    edges: NDArray[np.int64],
+    filled: NDArray[np.bool_],
+    probability: NDArray[np.uint8],
+    scale: NDArray[np.float64],
+    *,
+    gap_um: float,
+    min_cos: float,
+    mutual: bool,
+    min_p: float,
+) -> tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.bool_]]:
+    """Join piece tips to nearby pieces along the brightest path through the probability map.
+
+    A tip joins the nearest node of another piece within ``gap_um`` lying within
+    ``arccos(min_cos)`` of the tip's direction; with ``mutual`` that node must itself be a tip
+    pointing back. Candidates are taken shortest first, each tip joins at most once, and never
+    into its own (possibly already joined) piece, so no cycles form. The join follows the
+    minimal-cost path through ``1 / (p + 0.05)``; it is rejected if it detours (longer than
+    1.3 × the gap plus one voxel) or passes a voxel below ``min_p``. Path voxels become new nodes.
+    """
+    n = len(voxel)
     if gap_um <= 0 or n == 0:
-        return edges
+        return voxel, edges, filled
+    um = voxel * scale
     graph = _adjacency(edges, n)
     _, piece = connected_components(graph, directed=False)
     degree = np.asarray(graph.sum(axis=1)).ravel()
     tips = np.flatnonzero(degree == 1)
-    if len(tips) < 2:
-        return edges
-    directions = np.array([_tip_direction(graph, coordinates, tip) for tip in tips])
-    bridges = []
-    for i, j in cKDTree(coordinates[tips]).query_pairs(gap_um):
-        a, b = tips[i], tips[j]
-        if piece[a] == piece[b]:
+    if len(tips) == 0:
+        return voxel, edges, filled
+    direction = np.zeros((n, 3))
+    direction[tips] = [_tip_direction(graph, um, tip) for tip in tips]
+
+    neighbors = cKDTree(um).query_ball_point(um[tips], gap_um)
+    counts = np.fromiter(map(len, neighbors), dtype=np.int64, count=len(tips))
+    a = np.repeat(tips, counts)
+    b = np.fromiter((j for near in neighbors for j in near), dtype=np.int64, count=counts.sum())
+    a, b = a[piece[a] != piece[b]], b[piece[a] != piece[b]]
+    gap = um[b] - um[a]
+    distance = np.linalg.norm(gap, axis=1)
+    unit = gap / np.maximum(distance, 1e-9)[:, None]
+    ok = np.einsum("ij,ij->i", direction[a], unit) >= min_cos
+    if mutual:
+        ok &= (degree[b] == 1) & (np.einsum("ij,ij->i", direction[b], -unit) >= min_cos)
+    a, b, distance = a[ok], b[ok], distance[ok]
+    # the nearest node of each other piece, per tip; then all candidates shortest first
+    order = np.lexsort((distance, piece[b], a))
+    a, b, distance = a[order], b[order], distance[order]
+    first = np.ones(len(a), dtype=bool)
+    first[1:] = (a[1:] != a[:-1]) | (piece[b[1:]] != piece[b[:-1]])
+    a, b, distance = a[first], b[first], distance[first]
+
+    root = np.arange(piece.max() + 1)
+
+    def find(x: int) -> int:
+        while root[x] != x:
+            root[x] = root[root[x]]
+            x = root[x]
+        return x
+
+    used = np.zeros(n, dtype=bool)
+    new_voxels, new_edges = [], []
+    next_id, rejected = n, 0
+    for k in np.argsort(distance, kind="stable"):
+        s, t = a[k], b[k]
+        if used[s] or used[t]:
             continue
-        gap = coordinates[b] - coordinates[a]
-        distance = np.linalg.norm(gap)
-        if distance == 0:
-            bridges.append((a, b))
+        ps, pt = find(piece[s]), find(piece[t])
+        if ps == pt:
             continue
-        unit = gap / distance
-        if directions[i] @ unit >= min_cos and directions[j] @ -unit >= min_cos:
-            bridges.append((a, b))
-    log.info("Bridged %d gaps (≤ %.0f µm)", len(bridges), gap_um)
-    if not bridges:
-        return edges
-    return np.concatenate([edges, np.asarray(bridges, dtype=np.int64)])
+        path = _route(probability, voxel[s], voxel[t], scale)
+        length = np.linalg.norm(np.diff(path * scale, axis=0), axis=1).sum()
+        interior = path[1:-1]
+        weak = len(interior) and probability[tuple(interior.T)].min() < min_p * 255
+        if length > 1.3 * distance[k] + scale.max() or weak:
+            rejected += 1
+            continue
+        chain = np.concatenate([[s], np.arange(next_id, next_id + len(interior)), [t]])
+        next_id += len(interior)
+        new_voxels.append(interior)
+        new_edges.append(np.stack([chain[:-1], chain[1:]], axis=1))
+        root[ps] = pt
+        used[s] = True
+        used[t] = degree[t] == 1
+    log.info(
+        "Joined %d gaps (≤ %.0f µm%s); rejected %d off-signal or detouring",
+        len(new_edges), gap_um, ", tip to tip" if mutual else "", rejected,
+    )  # fmt: skip
+    if not new_edges:
+        return voxel, edges, filled
+    return (
+        np.concatenate([voxel, *new_voxels]),
+        np.concatenate([edges, *new_edges]),
+        np.concatenate([filled, np.ones(next_id - n, dtype=bool)]),
+    )
+
+
+def _route(
+    probability: NDArray[np.uint8], a: NDArray[np.int64], b: NDArray[np.int64], scale, pad: int = 4
+) -> NDArray[np.int64]:
+    """Voxel path from ``a`` to ``b`` of minimal ``1 / (p + 0.05)`` cost (physical distances)."""
+    from skimage.graph import MCP_Geometric
+
+    lo = np.maximum(np.minimum(a, b) - pad, 0)
+    hi = np.minimum(np.maximum(a, b) + pad + 1, probability.shape)
+    block = probability[tuple(slice(i, j) for i, j in zip(lo, hi, strict=True))]
+    mcp = MCP_Geometric(1.0 / (block / 255.0 + 0.05), sampling=tuple(scale))
+    mcp.find_costs([tuple(a - lo)], [tuple(b - lo)])
+    return np.asarray(mcp.traceback(tuple(b - lo)), dtype=np.int64) + lo
 
 
 def _tip_direction(graph, coordinates: NDArray[np.float64], tip: int, steps: int = 3) -> NDArray:

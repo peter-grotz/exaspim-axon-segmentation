@@ -274,6 +274,12 @@ def skeletonize(
     attach_um: Annotated[
         float, typer.Option(help="Keep shorter pieces only within this of anchor cable")
     ] = 50.0,
+    connect_um: Annotated[
+        float, typer.Option(help="Connect kept cable across gaps up to this; 0 = off")
+    ] = 50.0,
+    connect_min_p: Annotated[
+        float, typer.Option(help="Reject connections passing a voxel below this probability")
+    ] = 0.05,
     speckle_max_um: Annotated[
         float, typer.Option(help="Speckle removal: drop single-plane pieces shorter than this")
     ] = 60.0,
@@ -299,6 +305,8 @@ def skeletonize(
         min_piece_um=min_piece_um,
         anchor_um=anchor_um,
         attach_um=attach_um,
+        connect_um=connect_um,
+        connect_min_p=connect_min_p,
         speckle_max_um=speckle_max_um,
     )
     summary = skeletonize_prediction(prediction, out, config)

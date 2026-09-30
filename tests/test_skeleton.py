@@ -88,3 +88,27 @@ def test_isolation_keeps_pieces_near_anchor_cable_only():
     assert kept.voxels[10, 20:35, 100:103].any()
     assert not kept.voxels[10, 32:53, 200:203].any()
     assert kept.voxels[10, 11, 20:240].any()
+
+
+def test_connection_follows_dim_signal_but_not_background():
+    p = np.zeros((20, 30, 200), dtype=np.uint8)
+    p[9:12, 14:17, 10:90] = 230  # 240 um
+    p[9:12, 14:17, 90:98] = 30  # dim stretch (p ~ 0.12, below threshold)
+    p[9:12, 14:17, 98:180] = 230  # 246 um
+    region = Box((0, 0, 0), p.shape)
+    base = {"min_piece_um": 100.0, "anchor_um": 0.0, "bridge_um": 0.0}
+    joined = skeletonize_probability(p, GRID, region, SkeletonConfig(**base))
+    assert joined.edges.size and joined.filled.any()
+    assert _pieces(joined) == 1
+    p[9:12, 14:17, 90:98] = 0  # same gap over pure background: not connected
+    apart = skeletonize_probability(p, GRID, region, SkeletonConfig(**base))
+    assert _pieces(apart) == 2
+
+
+def _pieces(skel) -> int:
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+
+    n = len(skel.coordinates_um)
+    graph = coo_matrix((np.ones(len(skel.edges)), tuple(skel.edges.T)), shape=(n, n))
+    return connected_components(graph, directed=False)[0]
