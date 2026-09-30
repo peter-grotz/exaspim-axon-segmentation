@@ -265,6 +265,9 @@ def skeletonize(
     min_piece_um: Annotated[
         float, typer.Option(help="Drop connected skeleton pieces shorter than this")
     ] = 30.0,
+    speckle_max_um: Annotated[
+        float, typer.Option(help="Speckle removal: drop single-plane pieces shorter than this")
+    ] = 60.0,
     swc: Annotated[
         list[Path] | None, typer.Option("--swc", help="Complete traces to score against; repeat")
     ] = None,
@@ -284,6 +287,7 @@ def skeletonize(
         min_volume_um3=min_volume_um3,
         spur_um=spur_um,
         min_piece_um=min_piece_um,
+        speckle_max_um=speckle_max_um,
     )
     summary = skeletonize_prediction(prediction, out, config)
     if swc:

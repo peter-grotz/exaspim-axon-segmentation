@@ -44,6 +44,12 @@ class SkeletonConfig:
         Connected skeleton pieces shorter than this are dropped. Removes short fragments on
         faint texture: on 822178 MD, 30 µm cut untraced-lobe skeleton 313 → 109 mm while held-out
         trace recall stayed at 0.88.
+    speckle_max_um : float
+        Speckle removal: connected pieces confined to a single z-plane *and* shorter than this are
+        dropped. In-plane speckle (median 4 µm; 80k of 146k pieces on 822178 MD, none ≥ 60 µm) is
+        as bright and as confident as real axons but does not cross planes. Long pieces are kept
+        even when single-plane, because an axon running parallel to the image plane thins to a
+        one-plane centerline.
     """
 
     threshold: float = 0.2
@@ -52,6 +58,7 @@ class SkeletonConfig:
     spur_um: float = 10.0
     prune_rounds: int = 2
     min_piece_um: float = 30.0
+    speckle_max_um: float = 60.0
 
 
 @dataclass(frozen=True, eq=False)
@@ -167,7 +174,9 @@ def skeletonize_probability(
     graph = skeleton.graph.tocoo()
     upper = graph.row < graph.col
     edges = np.stack([graph.row[upper], graph.col[upper]], axis=1).astype(np.int64)
-    coordinates, edges, index = _drop_short_pieces(coordinates, edges, config.min_piece_um)
+    coordinates, edges, index = _drop_small_pieces(
+        coordinates, edges, config.min_piece_um, config.speckle_max_um, float(scale[0])
+    )
     final = np.zeros(mask.shape, dtype=bool)
     final[tuple(np.round(skeleton.coordinates[index]).astype(int).T)] = True
     result = AxonSkeleton(final, coordinates, edges, config)
@@ -184,17 +193,31 @@ def _adjacency(edges: NDArray[np.int64], n: int):
     return coo_matrix((data, (rows, cols)), shape=(n, n)).tocsr()
 
 
-def _drop_short_pieces(
-    coordinates: NDArray[np.float64], edges: NDArray[np.int64], min_um: float
+def _drop_small_pieces(
+    coordinates: NDArray[np.float64],
+    edges: NDArray[np.int64],
+    min_um: float,
+    speckle_max_um: float,
+    z_step_um: float,
 ) -> tuple[NDArray[np.float64], NDArray[np.int64], NDArray[np.int64]]:
-    """Remove connected pieces shorter than ``min_um``; returns kept coords, edges, node index."""
+    """Remove short pieces (``min_um``) and short single-plane speckle (``speckle_max_um``).
+
+    Returns kept coordinates, re-indexed edges, and the kept node indices.
+    """
     n = len(coordinates)
-    if min_um <= 0 or n == 0:
+    if n == 0 or (min_um <= 0 and speckle_max_um <= 0):
         return coordinates, edges, np.arange(n)
     _, piece = connected_components(_adjacency(edges, n), directed=False)
+    m = piece.max() + 1
     lengths = np.linalg.norm(coordinates[edges[:, 0]] - coordinates[edges[:, 1]], axis=1)
-    piece_length = np.bincount(piece[edges[:, 0]], weights=lengths, minlength=piece.max() + 1)
-    keep = np.flatnonzero(piece_length[piece] >= min_um)
+    piece_length = np.bincount(piece[edges[:, 0]], weights=lengths, minlength=m)
+    z_lo, z_hi = np.full(m, np.inf), np.full(m, -np.inf)
+    np.minimum.at(z_lo, piece, coordinates[:, 0])
+    np.maximum.at(z_hi, piece, coordinates[:, 0])
+    planes = np.round((z_hi - z_lo) / z_step_um).astype(int) + 1
+    speckle = (planes == 1) & (piece_length < speckle_max_um)
+    good = (piece_length >= min_um) & ~speckle
+    keep = np.flatnonzero(good[piece])
     remap = np.full(n, -1, dtype=np.int64)
     remap[keep] = np.arange(len(keep))
     kept_edges = remap[edges]

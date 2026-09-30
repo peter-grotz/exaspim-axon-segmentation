@@ -38,6 +38,19 @@ def test_min_piece_drops_short_isolated_fragments():
     kept = skeletonize_probability(p, GRID, region, SkeletonConfig(min_piece_um=30.0))
     assert not kept.voxels[25, 5:9, 100].any()
     loose = skeletonize_probability(
-        p, GRID, region, SkeletonConfig(min_piece_um=0.0, min_volume_um3=0)
+        p, GRID, region, SkeletonConfig(min_piece_um=0.0, min_volume_um3=0, speckle_max_um=0.0)
     )
     assert loose.voxels[25, 5:9, 100].any()
+
+
+def test_speckle_removal_drops_short_single_plane_pieces_only():
+    p = _probability()
+    p[25, 5:17, 100] = 230  # ~36 um fragment confined to one z-plane: speckle
+    region = Box((0, 0, 0), p.shape)
+    off = SkeletonConfig(min_volume_um3=0, speckle_max_um=0.0)
+    on = SkeletonConfig(min_volume_um3=0, speckle_max_um=60.0)
+    assert skeletonize_probability(p, GRID, region, off).voxels[25, 5:17, 100].any()
+    kept = skeletonize_probability(p, GRID, region, on)
+    assert not kept.voxels[25, 5:17, 100].any()
+    # the 300 um tube thins to a single-plane centerline but is long, so it survives
+    assert kept.length_um > 300
