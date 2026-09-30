@@ -53,6 +53,14 @@ class SkeletonConfig:
         On 822178 MD's traced lobe, 30 µm bridging + 100 µm minimum cut pieces 27.5k → 107 and
         off-trace skeleton 200 → 29 mm, at held-out trace recall 0.92 (0.93 unfiltered) and
         precision 0.92 near traces.
+    anchor_um : float
+        Isolation filter: pieces at least this long are *anchor* cable and always kept; shorter
+        pieces (still ≥ ``min_piece_um``) are kept only within ``attach_um`` of an anchor. Broken
+        branches of a real arbor sit next to it, noise fragments sit alone: on 822178 MD's traced
+        lobe every on-trace piece was ≤ 32 µm from an anchor, while off-trace pieces had a median
+        distance of 320 µm. Set 0 to disable.
+    attach_um : float
+        How close a shorter piece must come to anchor cable to be kept.
     speckle_max_um : float
         Speckle removal: connected pieces confined to a single z-plane *and* shorter than this are
         dropped. In-plane speckle (median 4 µm; 80k of 146k pieces on 822178 MD, none ≥ 60 µm) is
@@ -69,6 +77,8 @@ class SkeletonConfig:
     bridge_um: float = 30.0
     bridge_min_cos: float = 0.7
     min_piece_um: float = 100.0
+    anchor_um: float = 500.0
+    attach_um: float = 50.0
     speckle_max_um: float = 60.0
 
 
@@ -189,6 +199,10 @@ def skeletonize_probability(
     coordinates, edges, index = _drop_small_pieces(
         coordinates, edges, config.min_piece_um, config.speckle_max_um, float(scale[0])
     )
+    coordinates, edges, kept = _drop_isolated_pieces(
+        coordinates, edges, config.anchor_um, config.attach_um
+    )
+    index = index[kept]
     final = np.zeros(mask.shape, dtype=bool)
     final[tuple(np.round(skeleton.coordinates[index]).astype(int).T)] = True
     result = AxonSkeleton(final, coordinates, edges, config)
@@ -229,6 +243,37 @@ def _drop_small_pieces(
     planes = np.round((z_hi - z_lo) / z_step_um).astype(int) + 1
     speckle = (planes == 1) & (piece_length < speckle_max_um)
     good = (piece_length >= min_um) & ~speckle
+    keep = np.flatnonzero(good[piece])
+    remap = np.full(n, -1, dtype=np.int64)
+    remap[keep] = np.arange(len(keep))
+    kept_edges = remap[edges]
+    return coordinates[keep], kept_edges[(kept_edges >= 0).all(axis=1)], keep
+
+
+def _drop_isolated_pieces(
+    coordinates: NDArray[np.float64], edges: NDArray[np.int64], anchor_um: float, attach_um: float
+) -> tuple[NDArray[np.float64], NDArray[np.int64], NDArray[np.int64]]:
+    """Keep anchor pieces (≥ ``anchor_um``) and pieces within ``attach_um`` of one.
+
+    Returns kept coordinates, re-indexed edges, and the kept node indices.
+    """
+    n = len(coordinates)
+    if n == 0 or anchor_um <= 0:
+        return coordinates, edges, np.arange(n)
+    _, piece = connected_components(_adjacency(edges, n), directed=False)
+    lengths = np.linalg.norm(coordinates[edges[:, 0]] - coordinates[edges[:, 1]], axis=1)
+    piece_length = np.bincount(piece[edges[:, 0]], weights=lengths, minlength=piece.max() + 1)
+    anchor = piece_length >= anchor_um
+    good = anchor.copy()
+    if anchor.any():
+        near, _ = cKDTree(coordinates[anchor[piece]]).query(
+            coordinates, distance_upper_bound=attach_um
+        )
+        np.logical_or.at(good, piece, np.isfinite(near))
+    log.info(
+        "Kept %d anchor pieces (≥ %.0f µm) and %d attached; dropped %d isolated",
+        anchor.sum(), anchor_um, (good & ~anchor).sum(), (~good).sum(),
+    )  # fmt: skip
     keep = np.flatnonzero(good[piece])
     remap = np.full(n, -1, dtype=np.int64)
     remap[keep] = np.arange(len(keep))

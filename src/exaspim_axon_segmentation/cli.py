@@ -268,6 +268,12 @@ def skeletonize(
     min_piece_um: Annotated[
         float, typer.Option(help="Minimum cable length (after bridging)")
     ] = 100.0,
+    anchor_um: Annotated[
+        float, typer.Option(help="Pieces this long are anchor cable; 0 = no isolation filter")
+    ] = 500.0,
+    attach_um: Annotated[
+        float, typer.Option(help="Keep shorter pieces only within this of anchor cable")
+    ] = 50.0,
     speckle_max_um: Annotated[
         float, typer.Option(help="Speckle removal: drop single-plane pieces shorter than this")
     ] = 60.0,
@@ -291,6 +297,8 @@ def skeletonize(
         spur_um=spur_um,
         bridge_um=bridge_um,
         min_piece_um=min_piece_um,
+        anchor_um=anchor_um,
+        attach_um=attach_um,
         speckle_max_um=speckle_max_um,
     )
     summary = skeletonize_prediction(prediction, out, config)
