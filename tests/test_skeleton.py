@@ -139,3 +139,26 @@ def test_pieces_are_written_as_horta_swcs_in_absolute_micrometers(tmp_path):
             np.linalg.norm(swc.zyx_um[:, None] - skel.coordinates_um[None], axis=2), axis=1
         )
         assert nearest.max() < 1e-3
+
+
+def test_dendrites_of_somata_are_separated_from_passing_axons():
+    from exaspim_axon_segmentation.postprocess.dendrites import DendriteConfig, label_dendrites
+
+    x = np.arange(0.0, 900.0, 3.0)
+    dendrite = np.stack(
+        [np.full_like(x, 50.0), np.full_like(x[:100], 50.0).repeat(3)[: len(x)], x], 1
+    )
+    dendrite = np.stack([np.full(100, 50.0), np.full(100, 50.0), np.arange(100) * 3.0 + 30.0], 1)
+    broken = dendrite[-1] + np.stack([np.zeros(20), np.zeros(20), np.arange(20) * 3.0 + 30.0], 1)
+    axon = np.stack([np.full(400, 50.0), np.full(400, 900.0), np.arange(400) * 3.0 - 300.0], 1)
+    coords = np.concatenate([dendrite, broken, axon])
+
+    def chain(start, n):
+        return np.stack([np.arange(start, start + n - 1), np.arange(start + 1, start + n)], 1)
+
+    edges = np.concatenate([chain(0, 100), chain(100, 20), chain(120, 400)])
+    soma = np.array([[50.0, 50.0, 0.0]])
+    label = label_dendrites(coords, edges, soma, DendriteConfig())
+    assert label[:100].all()  # connected to the soma
+    assert label[100:120].all()  # broken-off piece, agglomerated onto the dendrite
+    assert not label[120:].any()  # axon passing 850 µm away
