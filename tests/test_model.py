@@ -7,6 +7,8 @@ import torch
 from exaspim_axon_segmentation.model import REGISTRY, TrailmapUNet3D, load_keras_weights
 from exaspim_axon_segmentation.model.convert import keras_layer_map
 
+pytestmark = pytest.mark.heavy
+
 REFERENCE = Path(__file__).parent / "data" / "keras_reference_axon.npz"
 
 

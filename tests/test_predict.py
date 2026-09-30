@@ -13,6 +13,8 @@ from exaspim_axon_segmentation.model import TrailmapUNet3D
 
 from .conftest import write_ngff
 
+pytestmark = pytest.mark.heavy
+
 
 def test_predict_tiles_matches_per_tile_reference(tmp_path):
     device = "cpu"

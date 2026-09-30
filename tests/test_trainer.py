@@ -1,6 +1,7 @@
 import json
 
 import numpy as np
+import pytest
 import torch
 
 from exaspim_axon_segmentation.inference import IntensityScaling
@@ -13,6 +14,8 @@ from exaspim_axon_segmentation.train.trainer import (
     finetune,
     weighted_bce,
 )
+
+pytestmark = pytest.mark.heavy
 
 
 def _volume():
