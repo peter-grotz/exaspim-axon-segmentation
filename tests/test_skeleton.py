@@ -112,3 +112,30 @@ def _pieces(skel) -> int:
     n = len(skel.coordinates_um)
     graph = coo_matrix((np.ones(len(skel.edges)), tuple(skel.edges.T)), shape=(n, n))
     return connected_components(graph, directed=False)[0]
+
+
+def test_pieces_are_written_as_horta_swcs_in_absolute_micrometers(tmp_path):
+    p = np.zeros((20, 40, 200), dtype=np.uint8)
+    p[9:12, 5:8, 10:190] = 230  # long piece
+    p[9:12, 30:33, 40:100] = 230  # shorter, separate piece
+    region = Box((2, 3, 4), (22, 43, 204))
+    config = SkeletonConfig(min_piece_um=50.0, anchor_um=0, connect_um=0, bridge_um=0)
+    skel = skeletonize_probability(p, GRID, region, config)
+    records = skel.write_pieces(tmp_path, "S_MD")
+    assert [r["file"] for r in records] == ["S_MD_0001.swc", "S_MD_0002.swc"]
+    assert records[0]["length_um"] > records[1]["length_um"]
+    for record in records:
+        path = tmp_path / record["file"]
+        lines = path.read_text().splitlines()
+        assert lines[0].startswith("# ORIGINAL_SOURCE")
+        assert lines[1].startswith("# OFFSET") and lines[2].startswith("# COLOR")
+        swc = read_swc(path)
+        assert list(swc.ids) == list(range(1, len(swc.ids) + 1))
+        assert all(parent < node for node, parent in zip(swc.ids, swc.parents, strict=True))
+        assert (swc.parents == -1).sum() == 1
+        assert np.isclose(swc.path_length_um(), record["length_um"])
+        # absolute positions after applying OFFSET are skeleton nodes
+        nearest = np.min(
+            np.linalg.norm(swc.zyx_um[:, None] - skel.coordinates_um[None], axis=2), axis=1
+        )
+        assert nearest.max() < 1e-3

@@ -77,3 +77,22 @@ def test_roi_mask_queries(labels_and_image):
     assert roi.fraction_inside(grid, Box((0, 0, 0), (2, 2, 2))) == 0
     assert roi.fraction_inside(grid, Box((0, 0, 0), (2, 2, 2)), dilate_um=40) > 0
     assert roi.fraction_inside(grid, Box((5, 3, 7), (6, 4, 8))) == 1
+
+
+@pytest.mark.parametrize("fraction", [0.5, 1.0])
+def test_grown_region_adds_the_requested_volume_as_a_uniform_shell(fraction):
+    # shells here are several voxels thick; a one-voxel shell overshoots on ties in distance
+    tf = LevelTransform((4.0, 3.0, 3.0), (0.0, 0.0, 0.0))
+    zz, yy, xx = np.indices((60, 80, 80))
+    ball = ((zz - 30) * 4.0) ** 2 + ((yy - 40) * 3.0) ** 2 + ((xx - 40) * 3.0) ** 2 < 90.0**2
+    roi = RegionRoi(frozenset({1}), ball[5:55, 8:72, 8:72], Box((5, 8, 8), (55, 72, 72)), tf)
+    grown = roi.grown(fraction)
+    assert grown.growth == fraction
+    assert abs(grown.n_voxels / roi.n_voxels - (1 + fraction)) < 0.02
+    # the original region is still inside, at the same physical place
+    assert grown.sample_on(tf, roi.mask_box)[roi.mask].all()
+    # and the shell is uniform: equal growth (in µm) along z and along x despite anisotropy
+    extent = [grown.hi_um - grown.lo_um, roi.hi_um - roi.lo_um]
+    dz, dx = (extent[0] - extent[1])[[0, 2]]
+    assert abs(dz - dx) <= 2 * 4.0
+    assert roi.grown(0) is roi

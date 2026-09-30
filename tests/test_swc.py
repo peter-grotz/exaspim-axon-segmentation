@@ -40,3 +40,10 @@ def test_write_round_trip(tmp_path):
     back = read_swc(out)
     np.testing.assert_allclose(back.xyz_um, swc.xyz_um, atol=1e-5)
     np.testing.assert_array_equal(back.parents, swc.parents)
+
+
+def test_empty_swc_round_trips(tmp_path):
+    path = tmp_path / "empty.swc"
+    path.write_text("# ORIGINAL_SOURCE test\n# OFFSET 0 0 0\n")
+    swc = read_swc(path)
+    assert len(swc.ids) == 0 and swc.edges().shape == (0, 2)

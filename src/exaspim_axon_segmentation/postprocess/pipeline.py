@@ -10,8 +10,8 @@ from pathlib import Path
 import numpy as np
 import zarr
 
-from exaspim_axon_segmentation.inference.pipeline import PROVENANCE_ATTR
-from exaspim_axon_segmentation.io import Box, ExaspimAsset, RegionRoi
+from exaspim_axon_segmentation.inference.pipeline import PROVENANCE_ATTR, prediction_roi
+from exaspim_axon_segmentation.io import Box, ExaspimAsset
 from exaspim_axon_segmentation.io.writer import create_ngff_array
 from exaspim_axon_segmentation.postprocess.cleanup import Category, CleanupConfig, cleanup
 from exaspim_axon_segmentation.postprocess.skeleton import SkeletonConfig, skeletonize_probability
@@ -62,9 +62,19 @@ def cleanup_prediction(
 
 
 def skeletonize_prediction(
-    prediction_uri: str, out_dir: Path, config: SkeletonConfig, *, crop: Box | None = None
+    prediction_uri: str,
+    out_dir: Path,
+    config: SkeletonConfig,
+    *,
+    crop: Box | None = None,
+    swc_prefix: str | None = None,
+    region_growth: float | None = None,
 ) -> dict:
-    """Skeletonize a probability output into ``skeleton.zarr``, ``skeleton.swc``, ``summary.json``.
+    """Skeletonize a probability output within its (grown) region.
+
+    Writes ``skeleton.zarr`` (skeleton voxels), ``skeleton.swc`` (all pieces as one forest),
+    ``swc/<prefix>_NNNN.swc`` (one Horta-importable file per connected piece, longest first) and
+    ``summary.json``.
 
     Parameters
     ----------
@@ -76,6 +86,10 @@ def skeletonize_prediction(
         Thresholds and pruning.
     crop : Box, optional
         Sub-box of the prediction (region-local indices) to process instead of all of it.
+    swc_prefix : str, optional
+        File name prefix of the per-piece SWCs (default ``<subject>_<regions>``).
+    region_growth : float, optional
+        Region growth to apply instead of the one recorded with the prediction.
     """
     group = zarr.open_group(prediction_uri, mode="r")
     provenance = dict(group.attrs[PROVENANCE_ATTR])
@@ -86,10 +100,11 @@ def skeletonize_prediction(
     local = crop or Box.full(region.shape)
     sub = Box.from_arrays(np.add(local.start, region.start), np.add(local.stop, region.start))
     probability = np.asarray(group["0"][local.slices])
+    roi = prediction_roi(asset, provenance, growth=region_growth)
+    inside = roi.sample_on(grid, sub)
+    probability[~inside] = 0  # segment within the (grown) region only
     skeleton = skeletonize_probability(probability, grid, sub, config)
 
-    roi = RegionRoi.from_annotation(asset.annotation, provenance["label_ids"])
-    inside = roi.sample_on(grid, sub)
     summary = {
         "prediction": prediction_uri,
         "config": asdict(config),
@@ -99,6 +114,7 @@ def skeletonize_prediction(
         "length_in_region_um": skeleton.length_inside_um(inside, grid, sub),
         "gap_filled_length_um": skeleton.filled_length_um,
         "region_volume_mm3": float(inside.sum() * np.prod(grid.scale) * 1e-9),
+        "region_growth": roi.growth,
     }
     summary["density_mm_per_mm3"] = (
         summary["length_in_region_um"] / 1e3 / summary["region_volume_mm3"]
@@ -107,6 +123,8 @@ def skeletonize_prediction(
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     skeleton.write_swc(out_dir / "skeleton.swc")
+    prefix = swc_prefix or f"{asset.subject_id}_{'+'.join(provenance['regions'])}"
+    summary["pieces"] = skeleton.write_pieces(out_dir / "swc", prefix)
     array = create_ngff_array(
         str(out_dir / "skeleton.zarr"), source=grid, region=sub, chunks=(128, 128, 128),
         dtype="uint8", name="axon_skeleton", attrs={"exaspim_axon_skeleton": summary},

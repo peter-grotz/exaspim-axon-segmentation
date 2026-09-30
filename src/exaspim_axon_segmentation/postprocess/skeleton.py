@@ -9,7 +9,7 @@ along the probability map → SWC forest + summary.
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 import cc3d
@@ -20,7 +20,9 @@ from scipy.spatial import cKDTree
 from skan import Skeleton, summarize
 from skimage.morphology import skeletonize
 
+from exaspim_axon_segmentation import __version__
 from exaspim_axon_segmentation.io import Box, LevelTransform
+from exaspim_axon_segmentation.train.swc import Swc, write_swc
 
 log = logging.getLogger(__name__)
 
@@ -150,36 +152,87 @@ class AxonSkeleton:
         keep = node_in[self.edges[:, 0]] & node_in[self.edges[:, 1]]
         return float(self.edge_lengths_um[keep].sum())
 
-    def write_swc(self, path: Path) -> None:
-        """Write the skeleton as an SWC forest (one root per connected piece), in µm (x, y, z).
-
-        Node type is 0 (undefined): the network does not distinguish axon from dendrite yet.
-        """
+    def pieces(self) -> list[tuple[NDArray[np.int64], float]]:
+        """Node indices and length of every connected piece, longest first."""
         n = len(self.coordinates_um)
-        graph = _adjacency(self.edges, n)
+        if n == 0:
+            return []
+        _, part = connected_components(_adjacency(self.edges, n), directed=False)
+        n_parts = part.max() + 1
+        length = np.bincount(
+            part[self.edges[:, 0]], weights=self.edge_lengths_um, minlength=n_parts
+        )
+        members = np.split(np.argsort(part, kind="stable"), np.cumsum(np.bincount(part))[:-1])
+        return [(members[p], float(length[p])) for p in np.argsort(-length, kind="stable")]
+
+    def to_swc(self, nodes: NDArray[np.int64] | None = None) -> Swc:
+        """SWC forest of the given nodes (default: all), one root per connected piece.
+
+        Nodes are ordered breadth-first from an end point of each piece, so every parent precedes
+        its children and ids run 1..n. Node type is 0 (undefined) and radius 1.0, as Horta writes
+        them; the network does not distinguish axon from dendrite yet.
+        """
+        nodes = np.arange(len(self.coordinates_um)) if nodes is None else np.asarray(nodes)
+        local = np.full(len(self.coordinates_um), -1, dtype=np.int64)
+        local[nodes] = np.arange(len(nodes))
+        keep = (local[self.edges] >= 0).all(axis=1)
+        edges = local[self.edges[keep]]
+        graph = _adjacency(edges, len(nodes))
         n_parts, part = connected_components(graph, directed=False)
-        parent = np.full(n, -1, dtype=np.int64)
+        parent = np.full(len(nodes), -1, dtype=np.int64)
         order = []
+        degree = np.asarray(graph.sum(axis=1)).ravel()
         for p in range(n_parts):
             members = np.flatnonzero(part == p)
-            degree = np.asarray(graph[members].sum(axis=1)).ravel()
-            root = members[np.argmin(degree)]  # an end point where there is one
-            nodes, predecessors = breadth_first_order(graph, root, directed=False)
-            order.extend(nodes.tolist())
-            parent[nodes] = predecessors[nodes]
-        ids = np.empty(n, dtype=np.int64)
-        ids[np.asarray(order)] = np.arange(1, n + 1)
-        lines = [
-            "# exaspim-axon-segmentation skeleton (TRAILMAP probability, physical um)",
-            f"# config {asdict(self.config)}",
-        ]
-        xyz = self.coordinates_um[:, ::-1]
-        for node in order:
-            p = parent[node]
-            x, y, z = xyz[node]
-            lines.append(f"{ids[node]} 0 {x:.3f} {y:.3f} {z:.3f} 1.0 {ids[p] if p >= 0 else -1}")
+            root = members[np.argmin(degree[members])]  # an end point where there is one
+            visit, predecessors = breadth_first_order(graph, root, directed=False)
+            order.extend(visit.tolist())
+            parent[visit] = predecessors[visit]
+        order = np.asarray(order, dtype=np.int64)
+        ids = np.empty(len(nodes), dtype=np.int64)
+        ids[order] = np.arange(1, len(nodes) + 1)
+        parents = np.where(parent[order] >= 0, ids[np.maximum(parent[order], 0)], -1)
+        return Swc(
+            ids=ids[order],
+            types=np.zeros(len(nodes), dtype=np.int64),
+            xyz_um=self.coordinates_um[nodes[order]][:, ::-1],
+            radius=np.ones(len(nodes)),
+            parents=parents,
+            header=(f"# ORIGINAL_SOURCE exaspim-axon-segmentation {__version__}",),
+        )
+
+    def write_swc(self, path: Path) -> None:
+        """Write the whole skeleton as one SWC forest (Horta format, see :meth:`write_pieces`)."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(lines) + "\n")
+        swc = self.to_swc()
+        write_swc(swc, path, offset_um=np.zeros(3) if not len(swc.ids) else None)
+
+    def write_pieces(self, directory: Path, prefix: str) -> list[dict]:
+        """Write one SWC per connected piece, longest first: ``<prefix>_0001.swc``, ...
+
+        Files follow the Janelia Workstation / HortaCloud export: ``# ORIGINAL_SOURCE``,
+        ``# OFFSET x y z`` (the piece's first node, µm) and ``# COLOR r,g,b`` headers, then
+        ``id type x y z radius parent`` rows in micrometers relative to the offset, in the physical
+        frame of ``fused.zarr``. Returns one record (file, nodes, length) per piece.
+        """
+        directory.mkdir(parents=True, exist_ok=True)
+        records = []
+        for k, (nodes, length) in enumerate(self.pieces(), start=1):
+            name = f"{prefix}_{k:04d}.swc"
+            write_swc(
+                self.to_swc(nodes),
+                directory / name,
+                color=PIECE_COLORS[(k - 1) % len(PIECE_COLORS)],
+            )
+            records.append({"file": name, "nodes": len(nodes), "length_um": length})
+        return records
+
+
+PIECE_COLORS = (  # colour of each piece's SWC (and QC figure), cycling by length rank
+    (0.122, 0.467, 0.706), (1.0, 0.498, 0.055), (0.173, 0.627, 0.173), (0.839, 0.153, 0.157),
+    (0.580, 0.404, 0.741), (0.549, 0.337, 0.294), (0.890, 0.467, 0.761), (0.090, 0.745, 0.812),
+    (0.737, 0.741, 0.133), (1.0, 1.0, 1.0),
+)  # fmt: skip
 
 
 def skeletonize_probability(

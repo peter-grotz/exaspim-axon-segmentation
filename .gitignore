@@ -17,3 +17,4 @@ wheels/
 
 # Training traces and derived label volumes (not versioned here)
 /data/
+/.claude/worktrees/
