@@ -96,3 +96,19 @@ def test_grown_region_adds_the_requested_volume_as_a_uniform_shell(fraction):
     dz, dx = (extent[0] - extent[1])[[0, 2]]
     assert abs(dz - dx) <= 2 * 4.0
     assert roi.grown(0) is roi
+
+
+def test_cubes_around_points_cover_each_point_and_nothing_far():
+    centers = np.array([[100.0, 200.0, 300.0], [100.0, 200.0, 2300.0]])
+    roi = RegionRoi.around_points(centers, 400.0)
+    assert roi.label_ids == frozenset()
+    grid = LevelTransform((4.0, 3.0, 3.0), (0.0, 0.0, 0.0))
+
+    def inside(point):
+        index = np.floor(grid.to_index(np.asarray(point)) + 0.5).astype(int)
+        return roi.sample_on(grid, Box.from_arrays(index, index + 1))[0, 0, 0]
+
+    assert inside(centers[0]) and inside(centers[1])
+    assert inside(centers[0] + [150, -150, 150])
+    assert not inside(centers[0] + [0, 0, 1000])  # between the cubes
+    assert abs(roi.volume_mm3 - 2 * 0.4**3) < 0.01
