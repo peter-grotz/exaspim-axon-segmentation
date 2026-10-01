@@ -24,6 +24,7 @@ BASE = "https://codeocean.allenneuraldynamics.org/api/v1"
 CAPSULE = "cde3a47b-a776-4a6c-94c3-e070c2092cc0"
 WEIGHTS = "/data/trailmap_finetune_v2/best.safetensors"
 MAX_ATTEMPTS = 5
+RETRY_WAIT_S = 15 * 60
 MODEL_ASSET = {"id": "52a5d51b-5ba7-4e5a-a923-65e4dd04c359", "mount": "trailmap_finetune_v2"}
 
 
@@ -54,7 +55,8 @@ def main() -> None:
                 if not ok and not r.get("has_results") and attempts < MAX_ATTEMPTS:
                     # usually "Selected Machine Unavailable": no GPU free, nothing ran; retry later
                     print(time.strftime("%H:%M"), subject, "not started; will retry", flush=True)
-                    state[subject] = {"state": "retry", "attempts": attempts}
+                    state[subject] = {"state": "retry", "attempts": attempts,
+                                      "after": time.time() + RETRY_WAIT_S * attempts}  # fmt: skip
                     continue
                 state[subject]["state"] = "done" if ok else "failed"
                 if ok:
@@ -63,7 +65,12 @@ def main() -> None:
                                     state[subject]["id"], str(args.out / subject),
                                     f"{tag}_skeleton", "qc"], check=False)  # fmt: skip
                 print(time.strftime("%H:%M"), subject, state[subject]["state"], flush=True)
-        todo = [j for j in jobs if state.get(j["subject"], {}).get("state", "retry") == "retry"]
+        todo = [
+            j for j in jobs
+            if state.get(j["subject"], {}).get("state", "retry") == "retry"
+            and state.get(j["subject"], {}).get("after", 0) <= time.time()
+        ]  # fmt: skip
+        waiting = any(v["state"] == "retry" for v in state.values())
         free = args.parallel - sum(v["state"] == "running" for v in state.values())
         for job in todo[: max(free, 0)]:
             params = ["predict", job["asset"], "MD", "2", "0", "160", "1", WEIGHTS, "0.2",
@@ -75,7 +82,7 @@ def main() -> None:
                                      "attempts": attempts}  # fmt: skip
             print(time.strftime("%H:%M"), job["subject"], "launched", r["id"], flush=True)
         state_path.write_text(json.dumps(state, indent=1))
-        if all(v["state"] != "running" for v in state.values()) and not todo:
+        if all(v["state"] != "running" for v in state.values()) and not todo and not waiting:
             break
         time.sleep(60)
     print("all done:", sum(v["state"] == "done" for v in state.values()), "succeeded,",
