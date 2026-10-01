@@ -242,8 +242,12 @@ def render_skeleton_map(
     axes[0].set_title(f"{n_pieces} connected pieces · one colour per piece/", loc="left",
                       fontsize=12)  # fmt: skip
     if typed:
-        colour = np.where((swc.types == 3)[:, None], DENDRITE, AXON)
-        _draw_skeleton(axes[1], zyx, edges, colour, width=0.9)
+        dendrite = swc.types == 3
+        both = dendrite[edges[:, 0]] & dendrite[edges[:, 1]]
+        faint = np.tile((0.62, 0.74, 0.86), (len(zyx), 1))  # dimmed blue, drawn underneath
+        _draw_skeleton(axes[1], zyx, edges[both], faint, width=0.5)
+        bright = np.tile((1.0, 0.33, 0.0), (len(zyx), 1))
+        _draw_skeleton(axes[1], zyx, edges[~both], bright, width=2.2)
         d = summary["dendrites"]
         try:
             from exaspim_axon_segmentation.postprocess.somata import load_somata
@@ -256,8 +260,8 @@ def render_skeleton_map(
         except FileNotFoundError:
             pass
         axes[1].set_title(
-            f"dendrites of detected somata {d['dendrite_um'] / 1e3:.0f} mm (blue) · "
-            f"axon candidates {d['axon_candidate_um'] / 1e3:.0f} mm (orange) · rings = somata/",
+            f"axon candidates {d['axon_candidate_um'] / 1e3:.0f} mm (orange) · dendrites of "
+            f"detected somata {d['dendrite_um'] / 1e3:.0f} mm (pale blue) · rings = somata/",
             loc="left", fontsize=12,
         )  # fmt: skip
     fig.suptitle(
