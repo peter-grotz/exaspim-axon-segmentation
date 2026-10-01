@@ -190,3 +190,81 @@ def _display(mip: NDArray) -> NDArray[np.float64]:
     image = mip.astype(np.float32)
     lo, hi = np.percentile(image, [1, 99.7])
     return np.clip((image - lo) / max(hi - lo, 1.0), 0, 1) ** 0.5
+
+
+def render_skeleton_map(
+    skeleton_dir: Path,
+    asset: ExaspimAsset,
+    label_ids,
+    out_path: Path,
+    *,
+    region_growth: float | None = None,
+    title: str | None = None,
+) -> None:
+    """Draw the skeleton as a clean map: no image, the region's z-footprint as a light fill.
+
+    Left: one colour per connected piece (as in the SWCs). Right, when the skeleton is typed:
+    dendrites of detected somata (blue), axon candidates (orange) and the somata (black rings).
+    Needs only the skeleton folder and the CCF annotation, so it can be drawn after the fact.
+    """
+    summary = json.loads((skeleton_dir / "summary.json").read_text())
+    growth = summary.get("region_growth", 0.0) if region_growth is None else region_growth
+    atlas = RegionRoi.from_annotation(asset.annotation, label_ids)
+    grown = atlas.grown(growth)
+    swc = read_swc(skeleton_dir / "skeleton.swc")
+    zyx, edges = swc.zyx_um, swc.edges()
+    typed = "dendrites" in summary and (swc.types > 0).any()
+
+    footprint = atlas.mask.any(axis=0)
+    scale = np.asarray(atlas.mask_transform.scale)
+    shift = np.asarray(atlas.mask_transform.translation)
+    lo = np.asarray(atlas.mask_box.start[1:]) * scale[1:] + shift[1:] - scale[1:] / 2
+    hi = lo + np.multiply(footprint.shape, scale[1:])
+    extent = (lo[1], hi[1], hi[0], lo[0])
+    pad = 0.04 * max(hi - lo)
+
+    panels = 2 if typed else 1
+    aspect = (hi[0] - lo[0]) / (hi[1] - lo[1])
+    fig, axes = plt.subplots(1, panels, figsize=(9.5 * panels, 9.5 * aspect + 1.2),
+                             layout="constrained", squeeze=False)  # fmt: skip
+    axes = axes[0]
+    beige = np.zeros((*footprint.shape, 4))
+    beige[footprint] = (0.93, 0.92, 0.89, 1.0)
+    for ax in axes:
+        ax.imshow(beige, extent=extent, interpolation="nearest")
+        _outline(ax, grown, "#C8C2B4", "--")
+        ax.set_xlim(lo[1] - pad, hi[1] + pad)
+        ax.set_ylim(hi[0] + pad, lo[0] - pad)
+        ax.set_aspect("equal")
+        ax.tick_params(length=0, labelsize=8)
+    n_pieces = len(summary.get("pieces", []))
+    _draw_skeleton(axes[0], zyx, edges, _piece_colours(zyx, edges), width=0.9)
+    axes[0].set_title(f"{n_pieces} connected pieces · one colour per piece/", loc="left",
+                      fontsize=12)  # fmt: skip
+    if typed:
+        colour = np.where((swc.types == 3)[:, None], DENDRITE, AXON)
+        _draw_skeleton(axes[1], zyx, edges, colour, width=0.9)
+        d = summary["dendrites"]
+        try:
+            from exaspim_axon_segmentation.postprocess.somata import load_somata
+
+            somata = np.array([x.center_um for x in load_somata(asset)]).reshape(-1, 3)
+            inside = (somata[:, 1] >= lo[0]) & (somata[:, 1] <= hi[0])
+            inside &= (somata[:, 2] >= lo[1]) & (somata[:, 2] <= hi[1])
+            axes[1].scatter(somata[inside, 2], somata[inside, 1], s=28, facecolors="none",
+                            edgecolors="black", linewidths=0.8)  # fmt: skip
+        except FileNotFoundError:
+            pass
+        axes[1].set_title(
+            f"dendrites of detected somata {d['dendrite_um'] / 1e3:.0f} mm (blue) · "
+            f"axon candidates {d['axon_candidate_um'] / 1e3:.0f} mm (orange) · rings = somata/",
+            loc="left", fontsize=12,
+        )  # fmt: skip
+    fig.suptitle(
+        title or f"{asset.name} · {summary['length_in_region_um'] / 1e3:.0f} mm of skeleton · "
+        f"region grown by {growth:.0%} (dashed)/",
+        x=0.01, ha="left", fontsize=13, fontweight="bold",
+    )  # fmt: skip
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=120)
+    plt.close(fig)

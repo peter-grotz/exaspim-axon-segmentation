@@ -407,6 +407,12 @@ def run(
                    annotation_asset=annotation_asset)  # fmt: skip
     summary = skeletonize_prediction(probability, skeleton_dir, SkeletonConfig(), swc_prefix=tag)
     render_skeleton_overview(probability, skeleton_dir, out / "qc" / f"{tag}_skeleton.png")
+    from exaspim_axon_segmentation.qc.skeleton import render_skeleton_map
+
+    render_skeleton_map(
+        skeleton_dir, ExaspimAsset(asset, annotation_root=annotation_asset),
+        CcfOntology.load().resolve(region), out / "qc" / f"{tag}_skeleton_map.png",
+    )  # fmt: skip
     log.info(
         "Done: %.0f mm of skeleton in %d pieces → %s",
         summary["length_in_region_um"] / 1e3, len(summary["pieces"]), skeleton_dir / "swc",
@@ -465,3 +471,21 @@ def predict_somata(
         writer = csv.DictWriter(f, fieldnames=["name", "length_mm", "pieces"])
         writer.writeheader()
         writer.writerows(index)
+
+
+@app.command("qc-skeleton-map")
+def qc_skeleton_map(
+    skeleton_dir: Annotated[Path, typer.Argument(help="Output directory of skeletonize")],
+    asset: Annotated[str, typer.Option(help="Asset the skeleton came from")],
+    region: RegionOpt,
+    out: Annotated[Path, typer.Option(help="Output PNG")] = Path("qc/skeleton_map.png"),
+    annotation_asset: Annotated[
+        str | None, typer.Option(help="Asset with the CCF alignment, if not ASSET")
+    ] = None,
+) -> None:
+    """Draw the skeleton on the region's footprint, coloured by piece and by dendrite/axon."""
+    from exaspim_axon_segmentation.qc.skeleton import render_skeleton_map
+
+    data = ExaspimAsset(asset, annotation_root=annotation_asset)
+    render_skeleton_map(skeleton_dir, data, CcfOntology.load().resolve(region), out)
+    log.info("Wrote %s", out)
