@@ -19,10 +19,12 @@ from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml.ns import qn
 from pptx.util import Inches, Pt
 
-INK, SLATE, MUTED = "1B2430", "5B6675", "8A93A0"
-PAPER, TINT, LIGHT = "FFFFFF", "F3F5F8", "C9D2DD"
-AXON, DENDRITE, DENDRITE_TEXT = "FF5400", "9EBCDB", "4F7FAE"
-HEAD, BODY = "Cambria", "Calibri"
+INK, SLATE, MUTED = "000000", "666666", "AAA39F"  # Allen ink / muted / warm gray
+PAPER, TINT, LIGHT, BORDER = "FFFFFF", "F3F0E8", "E6E6FF", "DED9D1"  # white, page, on blue, gray
+BLUE = "6464FF"  # Allen primary blue: title and closing slides
+AXON, DENDRITE, DENDRITE_TEXT = "FF6E00", "B9B9FF", "6464FF"  # Allen orange; pale/full blue
+# Allen Institute typefaces (no µ or → glyphs: write "um" and "->")
+HEAD, BODY = "Allen Institute Headline", "Allen Institute Text"
 
 samples = json.loads(Path(sys.argv[1]).read_text())
 ok = [s for s in samples if s["ok"]]
@@ -66,7 +68,11 @@ def card(slide, x, y, w, h, colour=TINT, shape=MSO_SHAPE.ROUNDED_RECTANGLE):
     s = slide.shapes.add_shape(shape, Inches(x), Inches(y), Inches(w), Inches(h))
     s.fill.solid()
     s.fill.fore_color.rgb = rgb(colour)
-    s.line.fill.background()
+    if colour == TINT:
+        s.line.color.rgb = rgb(BORDER)
+        s.line.width = Pt(0.75)
+    else:
+        s.line.fill.background()
     s.shadow.inherit = False
     if shape == MSO_SHAPE.ROUNDED_RECTANGLE:
         s.adjustments[0] = 0.08
@@ -83,34 +89,34 @@ def total(key):
 
 # 1 · title
 s = prs.slides.add_slide(BLANK)
-background(s, INK)
-text(s, 0.8, 2.0, 11.7, 1.0, "TRAILMAP axon segmentation across exaSPIM", size=40, colour=PAPER,
+background(s, BLUE)
+text(s, 0.8, 2.0, 11.9, 1.0, "trailmap axon segmentation across exaspim/", size=34, colour=PAPER,
      font=HEAD, bold=True)  # fmt: skip
-text(s, 0.8, 3.05, 11.7, 0.6, "Mediodorsal thalamus (MD) · fine-tuned U-Net · skeletons, debris "
+text(s, 0.8, 3.05, 11.7, 0.6, "mediodorsal thalamus (MD) · fine-tuned U-Net · skeletons, debris "
      "removal, dendrite labelling", size=20, colour=LIGHT)  # fmt: skip
 for i, (value, label, colour) in enumerate((
     (fmt(len(ok)), "samples processed", PAPER),
     (f"{total('skeleton_mm') / 1000:,.1f} m", "of skeleton in MD", PAPER),
-    (f"{fmt(total('axon_mm'))} mm", "axon candidates", AXON),
+    (f"{fmt(total('axon_mm'))} mm", "axon candidates", PAPER),
 )):  # fmt: skip
     text(s, 0.8 + i * 3.9, 4.5, 3.6, 0.9, value, size=44, colour=colour, font=HEAD, bold=True)
     text(s, 0.8 + i * 3.9, 5.45, 3.6, 0.4, label, size=16, colour=LIGHT)
-text(s, 0.8, 6.7, 4, 0.3, datetime.date.today().isoformat(), size=12, colour=MUTED)
+text(s, 0.8, 6.7, 4, 0.3, datetime.date.today().isoformat(), size=12, colour=LIGHT)
 
 # 2 · pipeline
 s = prs.slides.add_slide(BLANK)
 background(s, PAPER)
-text(s, 0.6, 0.45, 12, 0.8, "What every sample went through", size=36, colour=INK, font=HEAD,
+text(s, 0.6, 0.45, 12, 0.8, "what every sample went through/", size=36, colour=INK, font=HEAD,
      bold=True)  # fmt: skip
 steps = (
-    ("Region", "MD located in the reverse-registered CCF annotation and grown by 20% of its "
-     "volume (~58 µm shell)."),
-    ("Segment", "Fine-tuned TRAILMAP U-Net (v2) on fused level 2 (4 × 3 × 3 µm), on a Code Ocean "
+    ("region/", "MD located in the reverse-registered CCF annotation and grown by 20% of its "
+     "volume (~58 um shell)."),
+    ("segment/", "Fine-tuned TRAILMAP U-Net (v2) on fused level 2 (4 × 3 × 3 um), on a Code Ocean "
      "GPU."),
-    ("Skeletonize", "p > 0.2, thinned; speckle, short and isolated pieces removed as debris."),
-    ("Connect", "Loose ends joined to aligned cable ≤ 50 µm away along the brightest path."),
-    ("Label", "Cable connected to, or within the field of, a detected soma → dendrite; the rest "
-     "→ axon candidates."),
+    ("skeletonize/", "p > 0.2, thinned; speckle, short and isolated pieces removed as debris."),
+    ("connect/", "Loose ends joined to aligned cable ≤ 50 um away along the brightest path."),
+    ("label/", "Cable connected to, or within the field of, a detected soma -> dendrite; the rest "
+     "-> axon candidates."),
 )  # fmt: skip
 for i, (head, body) in enumerate(steps):
     x = 0.6 + i * 2.48
@@ -127,7 +133,7 @@ text(s, 0.6, 6.05, 12.1, 0.6, "Outputs per sample: one Horta-importable SWC per 
 # 3 · summary chart
 s = prs.slides.add_slide(BLANK)
 background(s, PAPER)
-text(s, 0.6, 0.45, 12, 0.8, "Cable found in MD, per sample", size=36, colour=INK, font=HEAD,
+text(s, 0.6, 0.45, 12, 0.8, "cable found in MD, per sample/", size=36, colour=INK, font=HEAD,
      bold=True)  # fmt: skip
 text(s, 0.6, 1.2, 12.1, 0.4, "Skeleton length inside the grown MD (mm, log scale): dendrites of "
      "detected somata and axon candidates, samples ordered by total length.", size=14,
@@ -149,6 +155,8 @@ chart.has_legend = True
 chart.legend.position = XL_LEGEND_POSITION.TOP
 chart.legend.include_in_layout = False
 chart.legend.font.size = Pt(12)
+chart.legend.font.name = BODY
+chart.font.name = BODY
 for series, colour in zip(chart.series, (DENDRITE, AXON), strict=True):
     series.format.fill.solid()
     series.format.fill.fore_color.rgb = rgb(colour)
@@ -180,7 +188,7 @@ val.axis_title.text_frame.paragraphs[0].runs[0].font.size = Pt(11)
 for x in ok:
     s = prs.slides.add_slide(BLANK)
     background(s, PAPER)
-    text(s, 0.5, 0.3, 6, 0.7, x["subject"], size=36, colour=INK, font=HEAD, bold=True)
+    text(s, 0.5, 0.3, 6, 0.7, x["subject"] + "/", size=36, colour=INK, font=HEAD, bold=True)
     text(s, 0.5, 0.97, 8.3, 0.3, x["asset"], size=11, colour=MUTED)
     main = x["images"].get("map") or x["images"].get("overview")
     if main:
@@ -207,7 +215,7 @@ for x in ok:
         h = min(3.65 * o["h"] / o["w"], 3.2)
         w = h * o["w"] / o["h"]
         s.shapes.add_picture(o["path"], Inches(9.1), Inches(3.85), Inches(w), Inches(h))
-        text(s, 9.1, 3.9 + h, 3.65, 0.3, "On the fused image: region outline, pieces, close-ups",
+        text(s, 9.1, 3.9 + h, 3.65, 0.3, "on the fused image: region outline, pieces, close-ups",
              size=10, colour=MUTED)  # fmt: skip
     s.notes_slide.notes_text_frame.text = (
         f"{x['subject']}: {fmt(x['skeleton_mm'], 1)} mm of skeleton in the grown MD "
@@ -218,8 +226,8 @@ for x in ok:
 
 # closing
 s = prs.slides.add_slide(BLANK)
-background(s, INK)
-text(s, 0.8, 0.8, 11.7, 0.8, "Not in this deck", size=36, colour=PAPER, font=HEAD, bold=True)
+background(s, BLUE)
+text(s, 0.8, 0.8, 11.7, 0.8, "not in this deck/", size=36, colour=PAPER, font=HEAD, bold=True)
 notes = [
     f"• {', '.join(f['subject'] for f in failed) or 'none'}: run failed (its CCF annotation is "
     "missing a pyramid level; it also has no soma detections)",
