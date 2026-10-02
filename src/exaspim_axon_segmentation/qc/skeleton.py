@@ -209,7 +209,9 @@ def render_skeleton_map(
     """
     summary = json.loads((skeleton_dir / "summary.json").read_text())
     growth = summary.get("region_growth", 0.0) if region_growth is None else region_growth
-    atlas = RegionRoi.from_annotation(asset.annotation, label_ids)
+    # the footprint and outline need no full resolution: level 1 is 8x smaller (MD: ~0.3 GB)
+    level = min(1, asset.annotation.n_levels - 1)
+    atlas = RegionRoi.from_annotation(asset.annotation, label_ids, level=level)
     grown = atlas.grown(growth)
     swc = read_swc(skeleton_dir / "skeleton.swc")
     zyx, edges = swc.zyx_um, swc.edges()
