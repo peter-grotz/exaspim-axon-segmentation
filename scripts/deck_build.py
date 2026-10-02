@@ -129,14 +129,21 @@ s = prs.slides.add_slide(BLANK)
 background(s, PAPER)
 text(s, 0.6, 0.45, 12, 0.8, "Cable found in MD, per sample", size=36, colour=INK, font=HEAD,
      bold=True)  # fmt: skip
-text(s, 0.6, 1.2, 12.1, 0.4, "Skeleton length inside the grown MD (mm), split into dendrites of "
-     "detected somata and axon candidates; longest first.", size=14, colour=SLATE)  # fmt: skip
+text(s, 0.6, 1.2, 12.1, 0.4, "Skeleton length inside the grown MD (mm, log scale): dendrites of "
+     "detected somata and axon candidates, samples ordered by total length.", size=14,
+     colour=SLATE)  # fmt: skip
 ordered = sorted(ok, key=lambda x: -x["skeleton_mm"])
 data = CategoryChartData()
 data.categories = [x["subject"] for x in ordered]
-data.add_series("Dendrites of detected somata", [x["dendrite_mm"] or 0 for x in ordered])
-data.add_series("Axon candidates", [x["axon_mm"] or 0 for x in ordered])
-chart = s.shapes.add_chart(XL_CHART_TYPE.COLUMN_STACKED, Inches(0.6), Inches(1.7), Inches(12.1),
+# log axis: lengths span 1 mm to several metres; empty categories get no bar (log 0 is undefined)
+data.add_series(
+    "Dendrites of detected somata",
+    [x["dendrite_mm"] if (x["dendrite_mm"] or 0) >= 1 else None for x in ordered],
+)
+data.add_series(
+    "Axon candidates", [x["axon_mm"] if (x["axon_mm"] or 0) >= 1 else None for x in ordered]
+)
+chart = s.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(0.6), Inches(1.7), Inches(12.1),
                            Inches(5.5), data).chart  # fmt: skip
 chart.has_legend = True
 chart.legend.position = XL_LEGEND_POSITION.TOP
@@ -145,7 +152,8 @@ chart.legend.font.size = Pt(12)
 for series, colour in zip(chart.series, (DENDRITE, AXON), strict=True):
     series.format.fill.solid()
     series.format.fill.fore_color.rgb = rgb(colour)
-chart.plots[0].gap_width = 40
+chart.plots[0].gap_width = 30
+chart.plots[0].overlap = 0
 cat, val = chart.category_axis, chart.value_axis
 cat.tick_labels.font.size = Pt(8)
 # every sample label, written vertically
@@ -160,6 +168,10 @@ val.tick_labels.font.size = Pt(10)
 val.tick_labels.font.color.rgb = rgb(SLATE)
 val.major_gridlines.format.line.color.rgb = rgb("E3E7EC")
 val.format.line.fill.background()
+scaling = val._element.find(qn("c:scaling"))
+log_base = scaling.makeelement(qn("c:logBase"), {"val": "10"})
+scaling.insert(0, log_base)  # schema: logBase comes first in c:scaling
+val.minimum_scale = 1
 val.has_title = True
 val.axis_title.text_frame.text = "mm"
 val.axis_title.text_frame.paragraphs[0].runs[0].font.size = Pt(11)
