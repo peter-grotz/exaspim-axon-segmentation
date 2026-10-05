@@ -58,11 +58,26 @@ def test_exit_found_where_axon_leaves_region_then_followed_after_stitch():
     assert len(exits) == 1 and exits[0, 3] > 0.99  # pointing along +x
     # the next cube's cable continues from 396 µm; stitching joins it, and it becomes followed
     added = graph.add(_line([200, 200, 396], [200, 200, 700]), 1)
-    _stitch(graph, added, config.join_um)
+    _stitch(graph, added, config.join_um, config.join_any_um)
     followed = _extend_followed(graph, followed)
     assert followed[added].all()
     # dendrite cable touching the axon is not followed
     graph.add(_line([200, 200, 703], [200, 200, 800], kind=DENDRITE), 1)
-    _stitch(graph, np.arange(graph.n - 33, graph.n), config.join_um)
+    _stitch(graph, np.arange(graph.n - 33, graph.n), config.join_um, config.join_any_um)
     followed = _extend_followed(graph, followed)
     assert not followed[graph.types == DENDRITE].any()
+
+
+def test_stitch_joins_ends_ahead_across_a_gap_but_not_sideways():
+    config = ExpandConfig()
+    graph = Graph()
+    graph.add(_line([200, 200, 100], [200, 200, 390]), 0)
+    ahead = graph.add(_line([200, 200, 407], [200, 200, 600]), 1)  # 17 µm ahead
+    _stitch(graph, ahead, config.join_um, config.join_any_um)
+    side = graph.add(_line([200, 215, 150], [200, 215, 350]), 1)  # parallel, 15 µm to the side
+    _stitch(graph, side, config.join_um, config.join_any_um)
+    _, piece = __import__("scipy.sparse.csgraph", fromlist=["x"]).connected_components(
+        graph.adjacency(), directed=False
+    )
+    assert piece[ahead[0]] == piece[0]
+    assert piece[side[0]] != piece[0]
