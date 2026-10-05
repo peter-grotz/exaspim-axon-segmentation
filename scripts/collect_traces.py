@@ -29,7 +29,7 @@ for root in roots:
             continue
         if not head[0].startswith("# ORIGINAL_SOURCE Janelia Workstation"):
             continue  # not a manual Horta/Workstation trace
-        m = re.search(r"exaSPIM_(\d{6})", str(path)) or re.search(r"N\d{3}-(\d{6})", path.name)
+        m = re.search(r"exaSPIM[_-](\d{6})", str(path)) or re.search(r"N\d{3}-(\d{6})", path.name)
         if not m or m.group(1) not in jobs:
             continue
         digest = hashlib.md5(path.read_bytes()).hexdigest()

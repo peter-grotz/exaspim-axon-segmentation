@@ -69,26 +69,28 @@ jobs = {j["subject"]: j for j in json.loads((batch / "jobs.json").read_text())}
 report = json.loads((batch / "untraced_summary.json").read_text())
 index = json.loads((batch / "traces_index.json").read_text())
 md = CcfOntology.load().resolve(["MD"])
-for subject, stats in sorted(report.items()):
+for subject in sorted(jobs):
+    stats = report.get(subject)
     if only and subject not in only:
         continue
     tag = f"{subject}_MD_L2"
     qc = batch / subject / "qc"
     cache = qc / "region_footprint.npz"
-    asset = ExaspimAsset(
-        jobs[subject]["asset"], annotation_root=jobs[subject]["annotation"] or None
-    )
-    untraced = batch / subject / f"{tag}_skeleton_untraced"
-    render_skeleton_map(untraced, asset, md, qc / f"{tag}_skeleton_map_untraced.png",
-                        head_font=A.HEAD, cache=cache,
-                        title=f"{subject} · md · untraced cable only · "
-                              f"{stats['after']['total_um'] / 1e3:.0f} mm/")  # fmt: skip
-    if stats["removed_um"] <= 0:
-        print(subject, "map (nothing removed)", flush=True)
+    original = batch / subject / f"{tag}_skeleton"
+    if not (original / "skeleton.swc").exists() or not cache.exists():
+        print(subject, "skipped (no skeleton or footprint cache)", flush=True)
         continue
+    job = jobs[subject]
+    asset = ExaspimAsset(job["asset"], annotation_root=job["annotation"] or None)
+    untraced = batch / subject / f"{tag}_skeleton_untraced"
+    if stats is not None:
+        render_skeleton_map(untraced, asset, md, qc / f"{tag}_skeleton_map_untraced.png",
+                            head_font=A.HEAD, cache=cache,
+                            title=f"{subject} · md · untraced cable only · "
+                                  f"{stats['after']['total_um'] / 1e3:.0f} mm/")  # fmt: skip
 
-    before = read_swc(batch / subject / f"{tag}_skeleton" / "skeleton.swc")
-    after = read_swc(untraced / "skeleton.swc")
+    before = read_swc(original / "skeleton.swc")
+    after = read_swc(untraced / "skeleton.swc") if stats is not None else before
     kept = np.isfinite(cKDTree(after.zyx_um).query(before.zyx_um, distance_upper_bound=0.01)[0])
     e = before.edges()
     removed = ~(kept[e[:, 0]] & kept[e[:, 1]])
@@ -97,8 +99,8 @@ for subject, stats in sorted(report.items()):
     for ax in axes:
         aspect, lo, hi = frame(ax, cache)
     fig.set_size_inches(19, 9.5 * aspect + 1.4)
-    # traces near the region, thin violet
-    for f in index[subject]["files"]:
+    files = index.get(subject, {}).get("files", [])
+    for f in files:  # traces near the region, thin violet
         t = read_swc(f["path"])
         inside = np.all((t.zyx_um[:, 1:] >= lo - 200) & (t.zyx_um[:, 1:] <= hi + 200), axis=1)
         te = t.edges()
@@ -107,17 +109,25 @@ for subject, stats in sorted(report.items()):
     typed(axes[0], before)
     lines(axes[0], before.zyx_um, e[removed], REMOVED, 1.6, z=5)
     typed(axes[1], after)
-    b, a = stats["before"], stats["after"]
-    axes[0].set_title(f"before · traces (violet) and the predicted cable they overlap, removed "
-                      f"(maroon) · {stats['removed_um'] / 1e3:.0f} mm/", loc="left", fontsize=13,
-                      fontfamily=A.HEAD)  # fmt: skip
-    axes[1].set_title(f"after · axon candidates {b['axon_candidate_um'] / 1e3:.0f} -> "
-                      f"{a['axon_candidate_um'] / 1e3:.0f} mm · dendrites "
-                      f"{b['dendrite_um'] / 1e3:.0f} -> {a['dendrite_um'] / 1e3:.0f} mm/",
-                      loc="left", fontsize=13, fontfamily=A.HEAD)  # fmt: skip
-    fig.suptitle(f"{subject} · md · predicted skeleton overlapping {stats['trace_files']} trace "
-                 f"files (within {stats['near_um']:.0f} um)/", x=0.01, ha="left", fontsize=18,
-                 fontweight="bold", fontfamily=A.HEAD)  # fmt: skip
-    fig.savefig(qc / f"{tag}_traced_removed.png", dpi=150)
+    summary = json.loads((original / "summary.json").read_text()).get("dendrites", {})
+    if stats is None:
+        left = "before · no manual traces found for this sample/"
+        right = (f"after · unchanged · axon candidates "
+                 f"{summary.get('axon_candidate_um', 0) / 1e3:.0f} mm · dendrites "
+                 f"{summary.get('dendrite_um', 0) / 1e3:.0f} mm/")  # fmt: skip
+        head = f"{subject} · md · no manual traces: nothing removed/"
+    else:
+        b, a = stats["before"], stats["after"]
+        left = (f"before · traces (violet) and the predicted cable they overlap, removed "
+                f"(maroon) · {stats['removed_um'] / 1e3:.0f} mm/")  # fmt: skip
+        right = (f"after · axon candidates {b['axon_candidate_um'] / 1e3:.0f} -> "
+                 f"{a['axon_candidate_um'] / 1e3:.0f} mm · dendrites "
+                 f"{b['dendrite_um'] / 1e3:.0f} -> {a['dendrite_um'] / 1e3:.0f} mm/")  # fmt: skip
+        head = (f"{subject} · md · {stats['trace_files']} manual trace files · predicted cable "
+                f"within {stats['near_um']:.0f} um of a trace removed/")  # fmt: skip
+    axes[0].set_title(left, loc="left", fontsize=13, fontfamily=A.HEAD)
+    axes[1].set_title(right, loc="left", fontsize=13, fontfamily=A.HEAD)
+    fig.suptitle(head, x=0.01, ha="left", fontsize=18, fontweight="bold", fontfamily=A.HEAD)
+    fig.savefig(qc / f"{tag}_before_after.png", dpi=150)
     plt.close(fig)
-    print(subject, "map + before/after", flush=True)
+    print(subject, "before/after" + ("" if stats else " (no traces)"), flush=True)
