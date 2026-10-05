@@ -27,8 +27,13 @@ AXON, DENDRITE, DENDRITE_TEXT = "FF6E00", "B9B9FF", "6464FF"  # Allen orange; pa
 HEAD, BODY = "Allen Institute Headline", "Allen Institute Text"
 
 samples = json.loads(Path(sys.argv[1]).read_text())
-ok = [s for s in samples if s["ok"]]
+# untraced decks (samples_untraced.json) show only cable no manual trace overlaps, and leave out
+# samples with less than MIN_AXON_MM of axon candidates
+UNTRACED = any("traced" in s for s in samples)
+MIN_AXON_MM = 10.0 if UNTRACED else 0.0
 failed = [s for s in samples if not s["ok"]]
+low = [s for s in samples if s["ok"] and (s["axon_mm"] or 0) < MIN_AXON_MM]
+ok = [s for s in samples if s["ok"] and (s["axon_mm"] or 0) >= MIN_AXON_MM]
 
 prs = Presentation()
 prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
@@ -92,8 +97,13 @@ s = prs.slides.add_slide(BLANK)
 background(s, BLUE)
 text(s, 0.8, 2.0, 11.9, 1.0, "trailmap axon segmentation across exaspim/", size=34, colour=PAPER,
      font=HEAD, bold=True)  # fmt: skip
-text(s, 0.8, 3.05, 11.7, 0.6, "mediodorsal thalamus (MD) · fine-tuned U-Net · skeletons, debris "
-     "removal, dendrite labelling", size=20, colour=LIGHT)  # fmt: skip
+if UNTRACED:
+    subtitle = "mediodorsal thalamus (MD) · untraced cable only: predicted skeleton overlapping "
+    subtitle += "manual traces removed"
+else:
+    subtitle = "mediodorsal thalamus (MD) · fine-tuned U-Net · skeletons, debris removal, "
+    subtitle += "dendrite labelling"
+text(s, 0.8, 3.05, 11.7, 0.9, subtitle, size=20, colour=LIGHT)
 for i, (value, label, colour) in enumerate((
     (fmt(len(ok)), "samples processed", PAPER),
     (f"{total('skeleton_mm') / 1000:,.1f} m", "of skeleton in MD", PAPER),
@@ -126,7 +136,9 @@ for i, (head, body) in enumerate(steps):
          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)  # fmt: skip
     text(s, x + 0.25, 2.85, 1.85, 0.45, head, size=20, colour=INK, font=HEAD, bold=True)
     text(s, x + 0.25, 3.35, 1.85, 2.1, body, size=14, colour=SLATE)
-text(s, 0.6, 6.05, 12.1, 0.6, "Outputs per sample: one Horta-importable SWC per piece (type 3 = "
+text(s, 0.6, 6.0, 12.1, 0.9, ("Then, for the 18 subjects with manual (Horta) traces: predicted "
+     "skeleton within 10 um of any trace removed, and the stubs it leaves (< 100 um). "
+     if UNTRACED else "") + "Outputs per sample: one Horta-importable SWC per piece (type 3 = "
      "dendrite, 2 = axon candidate), axon candidates separately, QC figures.", size=14,
      colour=SLATE)  # fmt: skip
 
@@ -210,14 +222,34 @@ for x in ok:
         card(s, cx, cy, 1.75, 1.05)
         text(s, cx + 0.12, cy + 0.1, 1.55, 0.5, value, size=22, colour=colour, font=HEAD, bold=True)
         text(s, cx + 0.12, cy + 0.6, 1.55, 0.4, label, size=10, colour=SLATE)
-    if x["images"].get("map") and x["images"].get("overview"):
+    if x.get("traced"):
+        t = x["traced"]
+        card(s, 9.1, 3.85, 3.65, 1.05)
+        text(s, 9.22, 3.95, 3.4, 0.5, f"{fmt(t['removed_um'] / 1e3)} mm", size=22,
+             colour="8246E1", font=HEAD, bold=True)  # fmt: skip
+        text(s, 9.22, 4.45, 3.4, 0.4, f"overlapping {t['trace_files']} manual trace files, "
+             "removed" + (" (next slide)" if t["removed_um"] > 0 else ""), size=10,
+             colour=SLATE)  # fmt: skip
+    if x["images"].get("map") and x["images"].get("overview") and not UNTRACED:
         o = x["images"]["overview"]
         h = min(3.65 * o["h"] / o["w"], 3.2)
         w = h * o["w"] / o["h"]
         s.shapes.add_picture(o["path"], Inches(9.1), Inches(3.85), Inches(w), Inches(h))
         text(s, 9.1, 3.9 + h, 3.65, 0.3, "on the fused image: region outline, pieces, close-ups",
              size=10, colour=MUTED)  # fmt: skip
-    s.notes_slide.notes_text_frame.text = (
+    notes = s.notes_slide.notes_text_frame
+    removed = x["images"].get("removed")
+    if x.get("traced") and x["traced"]["removed_um"] > 0 and removed:
+        r = prs.slides.add_slide(BLANK)
+        background(r, PAPER)
+        text(r, 0.5, 0.3, 12, 0.7, f"{x['subject']}/ traced overlap removed/", size=30,
+             colour=INK, font=HEAD, bold=True)  # fmt: skip
+        w = 12.3
+        h = w * removed["h"] / removed["w"]
+        if h > 6.0:
+            h, w = 6.0, 6.0 * removed["w"] / removed["h"]
+        r.shapes.add_picture(removed["path"], Inches(0.5), Inches(1.15), Inches(w), Inches(h))
+    notes.text = (
         f"{x['subject']}: {fmt(x['skeleton_mm'], 1)} mm of skeleton in the grown MD "
         f"({fmt(x['region_mm3'], 1)} mm³); {fmt(x['dendrite_mm'], 1)} mm dendrite of "
         f"{x['somata'] or 0} detected somata; {fmt(x['axon_mm'], 1)} mm axon candidates in "
@@ -231,9 +263,11 @@ text(s, 0.8, 0.8, 11.7, 0.8, "not in this deck/", size=36, colour=PAPER, font=HE
 notes = [
     f"• {', '.join(f['subject'] for f in failed) or 'none'}: run failed (its CCF annotation is "
     "missing a pyramid level; it also has no soma detections)",
+    *([f"• {', '.join(x['subject'] for x in low)}: less than {MIN_AXON_MM:.0f} mm of untraced "
+       "axon candidates in MD"] if low else []),
     "• 39 more exaSPIM subjects: no processed asset with both a fused image and a CCF annotation",
-    "• Samples with little cable (e.g. 773889, 773890) look sparsely labelled in MD; their faint "
-    "fibres need a closer look",
+    *([] if UNTRACED else ["• Samples with little cable (e.g. 773889, 773890) look sparsely "
+                           "labelled in MD; their faint fibres need a closer look"]),
 ]  # fmt: skip
 box = text(s, 0.8, 1.9, 11.7, 3.5, notes, size=18, colour=LIGHT)
 for p in box.text_frame.paragraphs:
