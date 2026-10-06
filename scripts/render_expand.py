@@ -65,15 +65,17 @@ for side in ("top", "right"):
 ax.set_xlabel("x (um)", fontsize=9)
 ax.set_ylabel("y (um)", fontsize=9)
 subject = Path(summary["asset"]).name.split("_")[1]
+axons = f" · {summary['axons']} axons" if "axons" in summary else ""
 ax.set_title(
-    f"{subject} · axons followed out of md · {len(summary['rounds'])} rounds · "
-    f"{len(summary['cubes'])} cubes · {summary['followed_mm']:.0f} mm followed · "
-    f"{len(summary['somata_reached'])} somata reached (stars) · stop: {summary['stop']}/",
+    f"{subject} · axons followed out of md · stop: {summary['stop']}/\n"
+    f"{len(summary['rounds'])} rounds · {len(summary['cubes'])} cubes · "
+    f"{summary['followed_mm']:.0f} mm followed{axons} · "
+    f"{len(summary['somata_reached'])} somata reached (stars)",
     loc="left", fontsize=13, fontfamily=A.HEAD,
 )  # fmt: skip
-fig.text(0.01, 0.005, "colour = round the cable was added (dark = md, light = later) · grey "
-         "squares = predicted cubes · blue = cable traced by the robo tracer · pale blue = dendrites of detected somata · grey = cable not "
-         "followed",
+fig.text(0.01, 0.005, "colour = round the cable was added (dark = md, light = later) · blue = "
+         "cable traced by the robo tracer · grey = cable not followed\npale blue = dendrites of "
+         "detected somata · grey squares = predicted cubes",
          fontsize=9, color=A.C["muted"])  # fmt: skip
 args.out.parent.mkdir(parents=True, exist_ok=True)
 fig.savefig(args.out, dpi=150)

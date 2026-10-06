@@ -5,9 +5,9 @@ from exaspim_axon_segmentation.expand import (
     DENDRITE,
     DoneArea,
     ExpandConfig,
+    Followed,
     Graph,
     _exits,
-    _extend_followed,
     _path_from_region,
     _stitch,
 )
@@ -57,14 +57,15 @@ def test_exit_found_where_axon_leaves_region_then_followed_after_stitch():
     exits = _exits(graph, followed, done, config, dist)
     assert len(exits) == 1 and exits[0, 3] > 0.99  # pointing along +x
     # the next cube's cable continues from 396 µm; stitching joins it, and it becomes followed
+    state = Followed(graph, followed)
     added = graph.add(_line([200, 200, 396], [200, 200, 700]), 1)
     _stitch(graph, added, config.join_um, config.join_any_um)
-    followed = _extend_followed(graph, followed)
+    followed = state.grow(graph, config)
     assert followed[added].all()
     # dendrite cable touching the axon is not followed
     graph.add(_line([200, 200, 703], [200, 200, 800], kind=DENDRITE), 1)
     _stitch(graph, np.arange(graph.n - 33, graph.n), config.join_um, config.join_any_um)
-    followed = _extend_followed(graph, followed)
+    followed = state.grow(graph, config)
     assert not followed[graph.types == DENDRITE].any()
 
 
@@ -110,10 +111,29 @@ def test_trace_ends_links_a_gap_and_closes_the_end():
     followed = np.zeros(graph.n, bool)
     followed[: other[0]] = True
     tracer = _FakeTracer([340.0, 200.0, 200.0])  # x, y, z of the far piece's near end
-    followed, ended, counts = _trace_ends(graph, followed, np.zeros(0, bool), done, done.roi,
+    state = Followed(graph, followed)
+    followed, ended, counts = _trace_ends(graph, state, np.zeros(0, bool), done, done.roi,
                                           tracer, ExpandConfig(), None, 0)  # fmt: skip
     assert counts["linked"] >= 1
     assert followed[other].all()
     assert (graph.source == TRACED).sum() == 5
     # the far piece's own outer end (x = 390) stays open for the next pass; the near tip closed
     assert ended[np.argmin(np.abs(graph.coords[:, 2] - 300))]
+
+
+def test_followed_axon_goes_straight_through_a_crossing_fibre_without_adopting_it():
+    config = ExpandConfig()
+    graph = Graph()
+    graph.add(_line([200, 200, 100], [200, 200, 300]), 0)  # the followed axon, along +x
+    state = Followed(graph, np.ones(graph.n, bool))
+    ahead = graph.add(_line([200, 200, 303], [200, 200, 600]), 1)  # its continuation
+    cross = graph.add(_line([200, 50, 450], [200, 350, 450]), 1)  # a fibre crossing it (along y)
+    j_ahead = ahead[np.argmin(np.abs(graph.coords[ahead, 2] - 450))]
+    j_cross = cross[np.argmin(np.abs(graph.coords[cross, 1] - 200))]
+    graph.edges = np.concatenate([graph.edges, [[ahead[0] - 1, ahead[0]], [j_ahead, j_cross]]])
+    followed = state.grow(graph, config)  # no tracer: the straightest arm within 45° is kept
+    assert followed[ahead].all()
+    assert not followed[cross].any()
+    assert state.stats["arms_rejected"] >= 1
+    # growing again does not revisit the rejected arms
+    assert not state.grow(graph, config)[cross].any()
