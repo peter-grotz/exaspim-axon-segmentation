@@ -137,3 +137,35 @@ def test_followed_axon_goes_straight_through_a_crossing_fibre_without_adopting_i
     assert state.stats["arms_rejected"] >= 1
     # growing again does not revisit the rejected arms
     assert not state.grow(graph, config)[cross].any()
+
+
+def test_prune_twigs_drops_short_side_branches_only():
+    from exaspim_axon_segmentation.expand import _prune_twigs
+
+    main = _line([200, 200, 100], [200, 200, 400])  # 300 µm along x
+    k = len(main.coordinates_um) // 2
+    j = main.coordinates_um[k]
+    twig = j + np.array([[0, 3.0, 0], [0, 6.0, 0], [0, 9.0, 0]])  # 9 µm side twig
+    branch = j + np.array([[0, -3.0 * i, 0] for i in range(1, 11)])  # 30 µm side branch
+    pts = np.concatenate([main.coordinates_um, twig, branch])
+    n0, nt = len(main.coordinates_um), len(twig)
+    chain = [[n0 + nt + i, n0 + nt + i + 1] for i in range(9)]
+    edges = np.concatenate([main.edges, [[k, n0], [n0, n0 + 1], [n0 + 1, n0 + 2]],
+                            [[k, n0 + nt]], chain])  # fmt: skip
+    sk = AxonSkeleton(np.zeros((1, 1, 1), bool), pts, edges, SkeletonConfig(),
+                      np.zeros(len(pts), bool), np.full(len(pts), AXON))  # fmt: skip
+    out = _prune_twigs(sk, 15.0)
+    assert len(out.coordinates_um) == len(pts) - nt
+
+
+def test_open_end_at_a_branch_point_whose_arms_were_rejected():
+    from exaspim_axon_segmentation.expand import _open_ends
+
+    graph = Graph()
+    graph.add(_line([200, 200, 100], [200, 200, 300]), 0)
+    arm = graph.add(_line([200, 203, 300], [200, 300, 300]), 1)
+    graph.edges = np.concatenate([graph.edges, [[arm[0] - 1, arm[0]]]])
+    followed = np.zeros(graph.n, bool)
+    followed[: arm[0]] = True
+    ends = np.flatnonzero(_open_ends(graph, followed))
+    assert arm[0] - 1 in ends  # the end touching unfollowed cable is still an open end
