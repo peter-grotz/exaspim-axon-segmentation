@@ -345,6 +345,29 @@ def skeletonize(
         log.info("Skeleton vs traces (box %s): %s", roi_box, scores)
 
 
+@app.command("predict-box")
+def predict_box_cmd(
+    asset: AssetArg,
+    lo: Annotated[str, typer.Option(help="Box corner x,y,z (µm, as in SWCs)")],
+    hi: Annotated[str, typer.Option(help="Opposite corner x,y,z (µm)")],
+    out: Annotated[Path, typer.Option(help="Output probability OME-Zarr")],
+    weights: Annotated[str, typer.Option(help="Fine-tuned .safetensors or registered name")],
+    level: Annotated[int, typer.Option(help="fused.zarr pyramid level")] = 2,
+    batch_size: Annotated[int, typer.Option()] = 2,
+    device: Annotated[str, typer.Option(help="auto | cuda | cpu")] = "auto",
+) -> None:
+    """Segment an arbitrary box of an asset (resumable); then use skeletonize-blocks."""
+    import numpy as np
+
+    from exaspim_axon_segmentation.inference.pipeline import predict_box
+
+    a = np.array([float(v) for v in lo.split(",")])[::-1]
+    b = np.array([float(v) for v in hi.split(",")])[::-1]
+    config = InferenceConfig(weights=weights, level=level, batch_size=batch_size, device=device,
+                             region_growth=0.0)  # fmt: skip
+    predict_box(asset, np.minimum(a, b), np.maximum(a, b), str(out), config)
+
+
 @app.command("skeletonize-blocks")
 def skeletonize_blocks(
     prediction: Annotated[str, typer.Argument(help="Probability OME-Zarr from `predict`")],
