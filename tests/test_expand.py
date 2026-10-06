@@ -81,3 +81,39 @@ def test_stitch_joins_ends_ahead_across_a_gap_but_not_sideways():
     )
     assert piece[ahead[0]] == piece[0]
     assert piece[side[0]] != piece[0]
+
+
+class _FakeTracer:
+    """Links every start straight to the piece ahead, across the gap."""
+
+    def __init__(self, target_xyz):
+        self.target = np.asarray(target_xyz, float)
+
+    def trace(self, starts, frags):
+        out = []
+        for s in starts:
+            p0 = s.path[-1]
+            pts = p0 + np.linspace(0, 1, 6)[:, None] * (self.target - p0)
+            _, j = frags.tree.query(self.target)
+            out.append(dict(status="linked", link=int(frags.piece[j]), p_link=0.9,
+                            trace=pts, steps=5, path_um=0.0, rejected=[]))  # fmt: skip
+        return out
+
+
+def test_trace_ends_links_a_gap_and_closes_the_end():
+    from exaspim_axon_segmentation.expand import TRACED, _trace_ends
+
+    done = DoneArea(_region())
+    graph = Graph()
+    graph.add(_line([200, 200, 100], [200, 200, 300]), 0)
+    other = graph.add(_line([200, 200, 340], [200, 200, 390]), 0)  # 40 µm gap: no geometric join
+    followed = np.zeros(graph.n, bool)
+    followed[: other[0]] = True
+    tracer = _FakeTracer([340.0, 200.0, 200.0])  # x, y, z of the far piece's near end
+    followed, ended, counts = _trace_ends(graph, followed, np.zeros(0, bool), done, done.roi,
+                                          tracer, ExpandConfig(), None, 0)  # fmt: skip
+    assert counts["linked"] >= 1
+    assert followed[other].all()
+    assert (graph.source == TRACED).sum() == 5
+    # the far piece's own outer end (x = 390) stays open for the next pass; the near tip closed
+    assert ended[np.argmin(np.abs(graph.coords[:, 2] - 300))]

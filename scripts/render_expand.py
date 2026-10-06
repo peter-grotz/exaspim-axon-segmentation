@@ -25,6 +25,7 @@ A.apply_style("white")
 summary = json.loads((args.expand_dir / "summary.json").read_text())
 g = np.load(args.expand_dir / "graph.npz")
 coords, edges, types, rnd, followed = g["coords"], g["edges"], g["types"], g["round"], g["followed"]
+source = g["source"] if "source" in g else np.zeros(len(coords), int)  # 1 = robo-traced
 
 fig, ax = plt.subplots(figsize=(12, 10), layout="constrained")
 if args.footprint and args.footprint.exists():
@@ -52,6 +53,7 @@ n_rounds = max(int(rnd.max()), 1)
 cmap = plt.get_cmap("plasma")
 for k in range(n_rounds + 1):
     draw(followed & (rnd == k), cmap(0.1 + 0.8 * k / n_rounds), 1.2, 3)
+draw(followed & (source == 1), A.BRAND["blue"], 1.6, 3.5)  # robo-traced cable (bridges, runs)
 for s in summary["somata_reached"]:
     ax.scatter(s["soma_um"][2], s["soma_um"][1], marker="*", s=180, c=A.BRAND["maroon"], zorder=4)
 ax.autoscale_view()
@@ -70,7 +72,7 @@ ax.set_title(
     loc="left", fontsize=13, fontfamily=A.HEAD,
 )  # fmt: skip
 fig.text(0.01, 0.005, "colour = round the cable was added (dark = md, light = later) · grey "
-         "squares = predicted cubes · pale blue = dendrites of detected somata · grey = cable not "
+         "squares = predicted cubes · blue = cable traced by the robo tracer · pale blue = dendrites of detected somata · grey = cable not "
          "followed",
          fontsize=9, color=A.C["muted"])  # fmt: skip
 args.out.parent.mkdir(parents=True, exist_ok=True)
