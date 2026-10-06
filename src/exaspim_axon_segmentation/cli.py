@@ -345,6 +345,32 @@ def skeletonize(
         log.info("Skeleton vs traces (box %s): %s", roi_box, scores)
 
 
+@app.command("skeletonize-blocks")
+def skeletonize_blocks(
+    prediction: Annotated[str, typer.Argument(help="Probability OME-Zarr from `predict`")],
+    out: Annotated[Path, typer.Option(help="Output directory")],
+    relaxed: Annotated[
+        bool, typer.Option(help="Block settings: no anchor rule, pieces >= 30 um (as in expand)")
+    ] = False,
+    block_vox: Annotated[int, typer.Option(help="Block core side (voxels)")] = 384,
+    halo_vox: Annotated[int, typer.Option(help="Context read around each block (voxels)")] = 32,
+    workers: Annotated[int, typer.Option(help="Processes for the local pass")] = 4,
+    min_swc_um: Annotated[float, typer.Option(help="Write per-piece SWCs from this length")] = 0.0,
+    mask_region: Annotated[
+        bool, typer.Option(help="Zero the prediction outside its region")
+    ] = True,
+) -> None:
+    """Skeletonize a probability map block by block, for volumes too large for memory."""
+    from exaspim_axon_segmentation.postprocess.blockwise import BlockConfig
+    from exaspim_axon_segmentation.postprocess.pipeline import skeletonize_prediction_blockwise
+    from exaspim_axon_segmentation.postprocess.skeleton import SkeletonConfig
+
+    config = SkeletonConfig(anchor_um=0, min_piece_um=30.0) if relaxed else SkeletonConfig()
+    block = BlockConfig(block_vox=block_vox, halo_vox=halo_vox, workers=workers)
+    skeletonize_prediction_blockwise(prediction, out, config, block, mask_region=mask_region,
+                                     min_swc_um=min_swc_um)  # fmt: skip
+
+
 @app.command("qc-skeleton")
 def qc_skeleton(
     prediction: Annotated[str, typer.Argument(help="Probability OME-Zarr from predict")],
