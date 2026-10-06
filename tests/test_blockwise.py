@@ -64,3 +64,31 @@ def test_blockwise_connects_an_end_onto_a_fibre_in_the_next_block():
         )
         assert piece.max() == 0  # joined into one piece
     assert abs(blocks.length_um - whole.length_um) / whole.length_um < 0.03
+
+
+def test_slab_source_reads_overlapping_slabs_as_one_volume(tmp_path):
+    import zarr
+
+    from exaspim_axon_segmentation.postprocess.blockwise import SlabSource
+
+    prob = _tubes()
+    cuts = [(0, 90), (70, 160)]  # two slabs along x, overlapping by 20 voxels
+    slabs = []
+    for k, (a, b) in enumerate(cuts):
+        uri = str(tmp_path / f"slab{k}.zarr")
+        g = zarr.open_group(uri, mode="w")
+        arr = g.create_array("0", shape=(60, 160, b - a), chunks=(32, 32, 32), dtype="uint8")
+        arr[:] = prob[:, :, a:b]
+        slabs.append((uri, (100, 200, 300 + a), (160, 360, 300 + b)))
+    src = SlabSource(slabs)
+    assert src.shape == prob.shape
+    np.testing.assert_array_equal(src[(slice(0, 60), slice(0, 160), slice(0, 160))], prob)
+    grid = LevelTransform((4.0, 3.0, 3.0), (0.0, 0.0, 0.0))
+    cfg = SkeletonConfig(anchor_um=0)
+    a = skeletonize_blockwise(
+        prob, grid, Box((0, 0, 0), prob.shape), cfg, BlockConfig(40, 16, workers=1)
+    )
+    b = skeletonize_blockwise(
+        src, grid, Box((0, 0, 0), prob.shape), cfg, BlockConfig(40, 16, workers=1)
+    )
+    assert abs(a.length_um - b.length_um) < 1e-6
