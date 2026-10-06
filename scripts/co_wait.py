@@ -12,9 +12,13 @@ pending = set(sys.argv[2:])
 while pending:
     for cid in sorted(pending):
         url = f"https://codeocean.allenneuraldynamics.org/api/v1/computations/{cid}"
-        r = json.load(
-            urllib.request.urlopen(urllib.request.Request(url, headers={"Authorization": auth}))
-        )
+        try:
+            r = json.load(
+                urllib.request.urlopen(urllib.request.Request(url, headers={"Authorization": auth}))
+            )
+        except OSError as error:  # network blip: try again next minute
+            print(time.strftime("%H:%M"), cid[:8], "poll failed:", error, flush=True)
+            continue
         if r["state"] in ("completed", "failed"):
             print(time.strftime("%H:%M"), cid[:8], r["state"], r.get("end_status"),
                   "results" if r.get("has_results") else "NO RESULTS",

@@ -1,6 +1,8 @@
 """Download selected result folders of a Code Ocean computation.
 
 Usage: uv run python scripts/co_download.py <token file> <computation id> <dest> <folder>...
+
+Zarr folders (e.g. an expand run's probability.zarr) are skipped unless --zarr is given.
 """
 
 import base64
@@ -13,7 +15,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 token = Path(sys.argv[1]).read_text().strip()
-cid, dest, roots = sys.argv[2], sys.argv[3], sys.argv[4:]
+with_zarr = "--zarr" in sys.argv
+cid, dest, roots = sys.argv[2], sys.argv[3], [a for a in sys.argv[4:] if a != "--zarr"]
 BASE = "https://codeocean.allenneuraldynamics.org/api/v1"
 AUTH = "Basic " + base64.b64encode(f"{token}:".encode()).decode()
 
@@ -32,7 +35,11 @@ for top in api(f"/computations/{cid}/results", {"path": ""})["items"]:
         stack.append(top["path"])
 while stack:
     for item in api(f"/computations/{cid}/results", {"path": stack.pop()})["items"]:
-        (stack if item["type"] == "folder" else files).append(item["path"])
+        if item["type"] == "folder":
+            if with_zarr or not item["path"].endswith(".zarr"):
+                stack.append(item["path"])
+        else:
+            files.append(item["path"])
 
 
 def get(path):
