@@ -92,3 +92,31 @@ def test_slab_source_reads_overlapping_slabs_as_one_volume(tmp_path):
         src, grid, Box((0, 0, 0), prob.shape), cfg, BlockConfig(40, 16, workers=1)
     )
     assert abs(a.length_um - b.length_um) < 1e-6
+
+
+def test_fast_swc_forest_matches_pieces():
+    from exaspim_axon_segmentation.postprocess.skeleton import AxonSkeleton
+
+    prob = _tubes()
+    grid = LevelTransform((4.0, 3.0, 3.0), (0.0, 0.0, 0.0))
+    sk = skeletonize_probability(
+        prob, grid, Box((0, 0, 0), prob.shape), SkeletonConfig(anchor_um=0, min_piece_um=0)
+    )
+    swc = sk.to_swc()
+    pos = {i: k for k, i in enumerate(swc.ids)}
+    assert all(
+        p == -1 or pos[p] < pos[i] for i, p in zip(swc.ids, swc.parents, strict=True)
+    )  # parents first
+    assert (swc.parents == -1).sum() == len(sk.pieces())  # one root per piece
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as d:
+        rec = sk.write_pieces(Path(d), "t")
+        expected = sk.pieces()
+        assert [r["nodes"] for r in rec] == [len(nodes) for nodes, _ in expected]
+        assert np.allclose([r["length_um"] for r in rec], [length for _, length in expected])
+        text = (Path(d) / "t_0001.swc").read_text().splitlines()
+        rows = [ln.split() for ln in text if not ln.startswith("#")]
+        assert rows[0][6] == "-1" and all(int(r[6]) < int(r[0]) for r in rows[1:])
+    assert isinstance(sk, AxonSkeleton)
