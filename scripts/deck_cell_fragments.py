@@ -41,14 +41,19 @@ s.background.fill.solid()
 s.background.fill.fore_color.rgb = PAGE
 text(s, Inches(0.6), Inches(2.4), Inches(12), Inches(1.2),
      "794495 · skeleton fragments on the 22 traced neurons: splits and merges/", 32)  # fmt: skip
-stats = {r["cell"]: r for r in json.load(open(Path(eval_npz).parent / "fragment_stats.json"))}
-text(s, Inches(0.6), Inches(3.5), Inches(12), Inches(3),
-     "U-Net + block-wise skeleton only (no tracer, default cleanup). A fragment is one connected "
-     "skeleton piece; it touches a cell where any edge lies within 10 um of the trace.\nLeft: the "
-     "cell's own cable coloured by fragment (splits). Right: all cable in those fragments - on the "
-     "cell (blue), on other traced cells (violet), untraced (red) - i.e. merge errors.\nThe largest "
-     "components: 14.4 m, 9.8 m and 7.6 m (the last joins 12 of the traced cells).",
-     16, MUTED, "Allen Institute Text")  # fmt: skip
+stats_file = Path(eval_npz).parent / "fragment_stats.json"
+stats = {r["cell"]: r for r in json.loads(stats_file.read_text())}
+intro = "\n".join(
+    [
+        "U-Net + block-wise skeleton only (no tracer, default cleanup). A fragment is one",
+        "connected skeleton piece; it touches a cell where an edge is within 10 um of the trace.",
+        "Left: the cell's own cable coloured by fragment (splits).",
+        "Right: all cable in those fragments: on the cell (blue), on other traced cells (violet),",
+        "untraced (red), i.e. merge errors.",
+        "Largest components: 14.4 m, 9.8 m and 7.6 m (the last joins 12 of the traced cells).",
+    ]
+)
+text(s, Inches(0.6), Inches(3.5), Inches(12), Inches(3), intro, 16, MUTED, "Allen Institute Text")
 for k, name in enumerate(names):
     f = fig_dir / f"{name}.png"
     if not f.exists():
