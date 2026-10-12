@@ -2,7 +2,10 @@
 
 Each scope is scored on its own patch at its own voxel size, on its own TRAILMAP detections.
 
-Usage: uv run python scripts/plot_snr_pair_stats.py <snr_pair dir> <out.png>
+Usage: uv run python scripts/plot_snr_pair_stats.py <snr_pair dir> <out.png> [--matched]
+
+--matched compares the 1x with the 5x averaged to the 1x voxel size and segmented again
+(``b.down_to_a``): same voxel size, same detector, same scoring.
 """
 
 import json
@@ -16,12 +19,19 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 d = json.loads((Path(sys.argv[1]) / "snr_pair.json").read_text())
+MATCHED = "--matched" in sys.argv
+
+
+def side_b(b):
+    return b.get("b", {}).get("down_to_a", {}) if MATCHED else b.get("b", {})
+
+
 B = [b for b in d["blocks"] if b.get("a", {}).get("snr") is not None
-     and b.get("b", {}).get("snr") is not None]  # fmt: skip
+     and side_b(b).get("snr") is not None]  # fmt: skip
 
 
 def stat(side, f):
-    return np.array([f(b[side]) for b in B], float)
+    return np.array([f(b["a"] if side == "a" else side_b(b)) for b in B], float)
 
 
 STATS = [  # name, function of a scored side, log axis
@@ -72,7 +82,8 @@ for r, (name, f, log) in enumerate(STATS):
     ax.set(xlabel="patch (sorted by 1x SNR)", title=f"{name}: each patch, 1x and 5x side by side")
     ax.legend(loc="upper left", fontsize=8)
     ax.grid(alpha=0.3, axis="y")
-fig.suptitle(f"791116 · same-day 1x (15×15×20 µm) vs 5x raw (3×3×4 µm) · {len(B)} patches, "
+what5 = "5x raw averaged to 15×15×20 µm, segmented again" if MATCHED else "5x raw (3×3×4 µm)"
+fig.suptitle(f"791116 · same-day 1x (15×15×20 µm) vs {what5} · {len(B)} patches, "
              "each scope on its own patch and its own TRAILMAP detections", y=0.998)  # fmt: skip
 fig.tight_layout()
 fig.savefig(sys.argv[2], dpi=70)
