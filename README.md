@@ -8,11 +8,9 @@ a PyTorch port of the pretrained [TRAILMAP](https://github.com/albert597/TRAILMA
 
 Status: early development.
 
-![Predicted skeleton vs a traced neuron](docs/images/794495_N001_skeleton_vs_traced.png)
-*794495, neuron N001: the traced axon (left, 185 mm; orange = recalled, red = missed, grey =
-dendrite), the skeleton predicted by the fine-tuned network over the whole traced volume (middle,
-178 mm within 10 µm of the cell), and the overlay (right): 96% of the traced axon is within 5 µm
-of the prediction.*
+![exaSPIM image and TRAILMAP axon probability](docs/images/709220_image_vs_probability.png)
+*709220, a 40 µm slab of the fused exaSPIM image (level 2, 3 µm voxels) and the fine-tuned
+network's axon probability: fibres are picked up, bright puncta and debris are not.*
 
 ## Install
 
@@ -77,22 +75,11 @@ to an older prediction), `qc-skeleton`.
 
 ## Results
 
-**Fine-tuned vs pretrained on exaSPIM.** The pretrained TRAILMAP weights call most of the exaSPIM
-tissue texture axon; after fine-tuning only the fibres remain. 822178 MD, 40 µm MIPs with the
-traces (teal = detected at p > 0.5, red = missed), training side (top) and a held-out slab
-(bottom):
-
-![Pretrained vs fine-tuned](docs/images/finetune_pretrained_vs_finetuned.png)
-
-**Recall against 22 traced neurons (794495, 6.8 m of axon).** The probability map over the full
-traced volume recalls 98.7% of the traced axon at p ≥ 0.2 (the skeletonizer's mask threshold) and
-96.0% at p ≥ 0.5, per neuron 84–100% at p ≥ 0.5. The network was never trained on this brain.
-
-![Recall vs threshold](docs/images/794495_recall_vs_threshold.png)
-
 **Following axons out of a region (709220).** Starting from MD, `expand` segments 800 µm cubes
 ahead of every open axon end, round after round; neuron N006 (red, 11.4 mm) was followed back to
-within 105 µm of its soma.
+within 105 µm of its soma. Top: the predictions (MD, the cubes, N006 in red, other followed axons
+in blue, predicted but not followed in grey); bottom: the same on the sample-space image, and the
+soma.
 
 ![Axon followed to its soma](docs/images/709220_N006_followed_axon.png)
 
