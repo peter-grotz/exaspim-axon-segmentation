@@ -23,7 +23,7 @@ from pathlib import Path
 import numpy as np
 
 
-def watchdog(limit=7e9):
+def watchdog(limit=10e9):
     while True:
         peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         if peak * (1 if os.uname().sysname == "Darwin" else 1024) > limit:

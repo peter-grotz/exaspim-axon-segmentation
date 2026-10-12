@@ -82,7 +82,7 @@ for r, (name, f, log) in enumerate(STATS):
     ax.set(xlabel="patch (sorted by 1x SNR)", title=f"{name}: each patch, 1x and 5x side by side")
     ax.legend(loc="upper left", fontsize=8)
     ax.grid(alpha=0.3, axis="y")
-what5 = "5x raw averaged to 15×15×20 µm, segmented again" if MATCHED else "5x raw (3×3×4 µm)"
+what5 = "5x raw averaged to 15×15×20 µm, segmented again" if MATCHED else (sys.argv[sys.argv.index("--label") + 1] if "--label" in sys.argv else "5x raw (3×3×4 µm)")
 fig.suptitle(f"791116 · same-day 1x (15×15×20 µm) vs {what5} · {len(B)} patches, "
              "each scope on its own patch and its own TRAILMAP detections", y=0.998)  # fmt: skip
 fig.tight_layout()
