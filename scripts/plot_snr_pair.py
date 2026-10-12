@@ -18,10 +18,19 @@ d = json.loads((d_dir / "snr_pair.json").read_text())
 B = [b for b in d["blocks"] if "skipped" not in b and "snr" in b.get("a", {})]
 good = [b for b in B if b["match_ncc"] >= 0.3 and (b.get("raw_vs_fused_ncc") or 0) >= 0.6
         and b.get("b", {}).get("snr") is not None]  # fmt: skip
-get = lambda bs, *k: np.array([  # noqa: E731
-    (lambda v: np.nan if v is None else v)(b.get(k[0], {}).get(k[1])) for b in bs], float)
+def get(bs, *k):
+    out = []
+    for b in bs:
+        v = b
+        for key in k:
+            v = v.get(key) if isinstance(v, dict) else None
+        out.append(np.nan if v is None else v)
+    return np.array(out, float)
+
+
+
 summary = {"blocks": len(B), "good_match": len(good)}
-for name, (s, k) in {"1x SNR (own detection)": ("a", "snr"),
+for name, k in {"1x SNR (own detection)": ("a", "snr"),
                      "5x raw SNR (own detection)": ("b", "snr"),
                      "1x SNR on 5x axons": ("cross", "a_snr_on_b_mask"),
                      "1x recall of 5x axons": ("cross", "recall_a"),
@@ -30,10 +39,20 @@ for name, (s, k) in {"1x SNR (own detection)": ("a", "snr"),
                      "5x raw noise SD (counts)": ("b", "noise_sd"),
                      "1x detected %": ("a", "axon_fraction"),
                      "5x detected %": ("b", "axon_fraction"),
-                     "5x axons on 1x grid %": ("cross", "b_axon_fraction_on_a")}.items():  # fmt: skip
-    v = get(good, s, k) * (100 if "%" in name else 1)
+                     "5x axons on 1x grid %": ("cross", "b_axon_fraction_on_a"),
+                     "matched voxel: 1x SNR": ("cross", "a_matched", "snr"),
+                     "matched voxel: 5x SNR": ("cross", "b_matched", "snr"),
+                     "matched voxel: 1x noise/background": ("cross", "a_matched", "nb"),
+                     "matched voxel: 5x noise/background": ("cross", "b_matched", "nb")}.items():  # fmt: skip
+    if k[-1] == "nb":
+        v = get(good, *k[:-1], "noise_sd") / get(good, *k[:-1], "background")
+    else:
+        v = get(good, *k) * (100 if "%" in name else 1)
     summary[name] = {"median": float(np.nanmedian(v)), "p25": float(np.nanpercentile(v, 25)),
                      "p75": float(np.nanpercentile(v, 75))}  # fmt: skip
+ratio = get(good, "cross", "b_matched", "snr") / get(good, "cross", "a_matched", "snr")
+summary["matched voxel: 5x/1x SNR ratio"] = {"median": float(np.nanmedian(ratio)),
+    "p25": float(np.nanpercentile(ratio, 25)), "p75": float(np.nanpercentile(ratio, 75))}  # fmt: skip
 Path(f"{out}_summary.json").write_text(json.dumps(summary, indent=1))
 for k, v in summary.items():
     print(k, v if not isinstance(v, dict) else "median %.3g [%.3g, %.3g]" % tuple(v.values()))
@@ -51,8 +70,14 @@ ax[0].legend()
 ax[1].scatter(get(good, "cross", "recall_a"), get(good, "cross", "precision_a"), c="#2e6db8")
 ax[1].set(xlabel="1x recall of 5x axons", ylabel="1x precision vs 5x axons", xlim=(0, 1),
           ylim=(0, 1), title="1x detection against the 5x (within 1 1x voxel)")  # fmt: skip
-ax[2].scatter(get(good, "a", "noise_sd"), get(good, "a", "snr"), c="#b84a2e", label="1x")
-ax[2].set(xlabel="noise SD (raw counts)", ylabel="SNR", title="noise and SNR, 1x")
+ma, mb = get(good, "cross", "a_matched", "snr"), get(good, "cross", "b_matched", "snr")
+lim2 = np.nanmax([ma, mb]) * 1.1
+ax[2].scatter(mb, ma, c="#2e6db8")
+for b, x, y in zip(good, mb, ma, strict=True):
+    ax[2].annotate(str(b["block"]), (x, y), fontsize=7, alpha=0.6)
+ax[2].plot([0, lim2], [0, lim2], "k--", lw=0.8)
+ax[2].set(xlabel="5x SNR at the 1x voxel size", ylabel="1x SNR", xlim=(0, lim2), ylim=(0, lim2),
+          title="same voxels (15x15x20 um), same mask (5x axons)")  # fmt: skip
 for x in ax:
     x.grid(alpha=0.3)
 fig.suptitle(f"791116 · same-day 1x (15x15x20 um) vs 5x raw (3x3x4 um) · {len(good)} of "
