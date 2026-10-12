@@ -6,7 +6,13 @@ Axon segmentation and skeletonization for exaSPIM light-sheet data, restricted t
 a PyTorch port of the pretrained [TRAILMAP](https://github.com/albert597/TRAILMAP) 3D U-Net
 (Friedmann et al., *PNAS* 2020; weights: [dfriedma/trailmap](https://huggingface.co/dfriedma/trailmap)).
 
-Status: early development. See [PLAN.md](PLAN.md) for the roadmap.
+Status: early development.
+
+![Predicted skeleton vs a traced neuron](docs/images/794495_N001_skeleton_vs_traced.png)
+*794495, neuron N001: the traced axon (left, 185 mm; orange = recalled, red = missed, grey =
+dendrite), the skeleton predicted by the fine-tuned network over the whole traced volume (middle,
+178 mm within 10 µm of the cell), and the overlay (right): 96% of the traced axon is within 5 µm
+of the prediction.*
 
 ## Install
 
@@ -68,6 +74,84 @@ matches its colour in the QC figure.
 
 The steps also run separately: `predict`, `skeletonize` (with `--region-growth` to apply a margin
 to an older prediction), `qc-skeleton`.
+
+## Results
+
+**Fine-tuned vs pretrained on exaSPIM.** The pretrained TRAILMAP weights call most of the exaSPIM
+tissue texture axon; after fine-tuning only the fibres remain. 822178 MD, 40 µm MIPs with the
+traces (teal = detected at p > 0.5, red = missed), training side (top) and a held-out slab
+(bottom):
+
+![Pretrained vs fine-tuned](docs/images/finetune_pretrained_vs_finetuned.png)
+
+**Recall against 22 traced neurons (794495, 6.8 m of axon).** The probability map over the full
+traced volume recalls 98.7% of the traced axon at p ≥ 0.2 (the skeletonizer's mask threshold) and
+96.0% at p ≥ 0.5, per neuron 84–100% at p ≥ 0.5. The network was never trained on this brain.
+
+![Recall vs threshold](docs/images/794495_recall_vs_threshold.png)
+
+**Following axons out of a region (709220).** Starting from MD, `expand` segments 800 µm cubes
+ahead of every open axon end, round after round; neuron N006 (red, 11.4 mm) was followed back to
+within 105 µm of its soma.
+
+![Axon followed to its soma](docs/images/709220_N006_followed_axon.png)
+
+## Fine-tuning
+
+The network is the TRAILMAP 3D U-Net with its pretrained weights as the starting point, fine-tuned
+on exaSPIM data at fused level 2 (4 × 2.99 × 2.99 µm, the grid every prediction runs on). The
+released weights are `trailmap_finetune_v2/best.safetensors`.
+
+**Training data.** Volumes where every axon is traced, so anything bright that is not near a trace
+is a genuine negative:
+
+- 822178 MD, a traced lobe (two neurons, ~32 mm of axon). Its tracing is complete only near the
+  traced cells, so voxels farther than 50 µm from a trace are ignored; the last 20% of the lobe
+  along x is held out for validation.
+- 17 completely traced 256³ blocks from four other brains (754611, 754612, 730223, 721828).
+- Brain 744783 (3 blocks) is held out entirely, as an unseen-brain test.
+
+**Labels**, from the SWC traces on the level-2 grid:
+
+| class | voxels | loss weight |
+|---|---|---|
+| axon | within 2 µm of a traced centreline | 1.5 |
+| edge | 2–5 µm from a centreline (uncertain axon boundary) | 0.05 |
+| hard negative | bright (above background + half the axon contrast, after 1.5 µm smoothing) and ≥ 8 µm from any trace: dendrites, somata, debris | 0.8 |
+| background | everything else in the traced region | 0.2 |
+| ignore | outside the traced region or envelope (context only) | 0 |
+
+The weights are TRAILMAP's own class weights; the loss is weighted binary cross-entropy,
+normalized by the summed weight.
+
+**Regime.**
+
+- 96³ input patches, 68³ scored output (the U-Net's 14-voxel context on each side), batch 4.
+- Patch centres: 50% on axon, 25% on hard negatives, 25% anywhere in the labelled region; the 822178
+  lobe is drawn half the time, the blocks the other half.
+- Augmentation: y/x flips, 90° rotations in-plane, and ±35% multiplicative intensity jitter. Z is
+  never swapped with y/x because the voxels are anisotropic.
+- Intensities are normalized per volume the same way as at inference: the background median maps
+  to 0 and the median foreground voxel to 0.25.
+- AdamW, learning rate 1e-4 with cosine decay, weight decay 1e-5; BatchNorm statistics frozen
+  (small batches); bf16 autocast on GPU.
+- 4,000 steps (≤ 40 min on an A10G); validation every 250 steps on 64 axon-enriched patches per
+  group; the checkpoint with the best mean F1 is kept (step 3,000).
+
+**Validation** (voxels at p > 0.5 on held-out patches):
+
+| | precision | recall | F1 | background called axon |
+|---|---|---|---|---|
+| 822178 MD, held-out slab · pretrained | 0.03 | 0.34 | 0.05 | 3.0% |
+| 822178 MD, held-out slab · fine-tuned | 0.66 | 0.86 | 0.75 | 0.10% |
+| brain 744783 (unseen) · pretrained | 0.01 | 0.55 | 0.02 | 5.5% |
+| brain 744783 (unseen) · fine-tuned | 0.38 | 0.62 | 0.47 | 0.07% |
+
+Known limitation: dendrites of labelled neurons are still often called axon (on 822178, 64% of
+hard-negative voxels are above 0.5), so the skeletonizer separates soma-connected cable afterwards.
+
+Train with the capsule's `finetune` mode (`capsule/code/run finetune [STEPS] [MAX_MINUTES]
+[HOLDOUT_BRAIN] [ENVELOPE_UM]`).
 
 ## Data expectations
 
