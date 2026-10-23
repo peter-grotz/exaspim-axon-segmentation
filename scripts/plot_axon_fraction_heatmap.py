@@ -21,6 +21,8 @@ from scipy.ndimage import gaussian_filter
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
+COUNTS = "--counts" in sys.argv  # plot detected axon voxels (millions) instead of fractions
+sys.argv = [a for a in sys.argv if a != "--counts"]
 out = sys.argv[1]
 ROWS = ["OLF", "CTX", "HPF", "CTXsp", "CNU", "TH", "HY", "MB", "CB", "P", "MY", "Spinal cord"]
 CCF = {"CTX": "Isocortex"}  # CTX row = isocortex: OLF, HPF and CTXsp are their own rows
@@ -57,26 +59,28 @@ for arg in sys.argv[2:]:
     left = ys < (ymin + ymax) / 2.0
     for tag, sel in (("", np.ones(anno.shape, bool)), (" left", left), (" right", ~left)):
         per = np.array([det[(row_of == i) & sel].sum() for i in range(len(ROWS))])
-        cols.append(per / per.sum())
+        cols.append(per / 1e6 if COUNTS else per / per.sum())
         names.append(name + tag)
-        print(name + tag, {r: round(float(v), 3) for r, v in zip(ROWS, per / per.sum(), strict=True)})
+        print(name + tag, {r: int(v) for r, v in zip(ROWS, per, strict=True)})
 M = np.array(cols).T
-json.dump({"rows": ROWS, "columns": names, "fraction_of_axons": M.tolist()}, open(out + ".json", "w"),
-          indent=1)  # fmt: skip
+key = "detected_axon_voxels_millions" if COUNTS else "fraction_of_axons"
+json.dump({"rows": ROWS, "columns": names, key: M.tolist(),
+           "voxel_um": [5.0, 3.76, 3.76]}, open(out + ".json", "w"), indent=1)  # fmt: skip
 
 plt.rcParams.update({"font.family": "Arial", "font.size": 13})
 fig = plt.figure(figsize=(2.6 + 0.6 * len(names), 7.0))
 ax = fig.add_axes([0.42, 0.17, 0.5, 0.64])
-im = ax.imshow(M, cmap="magma", vmin=0, vmax=1, aspect="auto", interpolation="nearest")
+vmax = float(np.ceil(M.max() / 10) * 10) if COUNTS else 1.0
+im = ax.imshow(M, cmap="magma", vmin=0, vmax=vmax, aspect="auto", interpolation="nearest")
 ax.set_yticks(range(len(ROWS)), ROWS)
 ax.set_xticks(range(len(names)), names, rotation=90)
 ax.tick_params(length=0)
 for s_ in ax.spines.values():
     s_.set_visible(False)
 cax = fig.add_axes([0.42, 0.89, 0.5, 0.022])
-cb = fig.colorbar(im, cax=cax, orientation="horizontal", ticks=[0, 1])
+cb = fig.colorbar(im, cax=cax, orientation="horizontal", ticks=[0, vmax])
 cb.outline.set_linewidth(0.8)
-cax.set_title("Fraction of axons", fontsize=13, pad=6)
+cax.set_title("Detected axon voxels (millions)" if COUNTS else "Fraction of axons", fontsize=13, pad=6)
 fig.savefig(out + ".png", dpi=200)
 fig.savefig(out + ".pdf")
 print("wrote", out + ".png")
