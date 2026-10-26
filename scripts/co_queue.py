@@ -1,7 +1,8 @@
 """Launch Code Ocean computations with at most N running at once (relaunching fast failures).
 
 Usage: uv run python scripts/co_queue.py <token file> <jobs.json> <state.json> [--max 8] [--gap 20] [--tries 3]
-jobs.json: {name: {"parameters": [...], "data_assets": [...]}}; capsule id inside as "_capsule".
+jobs.json: {name: {"parameters": [...], "data_assets": [...]}}; capsule id (or a list of copies of
+the capsule on different machine types) inside as "_capsule".
 A run that ends "failed" with no results is treated as not started and retried (--tries times;
 Code Ocean counts the wait for a machine as run time, so these can take several minutes). Launches are --gap seconds apart. State (run ids, outcomes) is written to
 state.json after every poll.
@@ -36,6 +37,7 @@ def api(path, body=None):
 
 jobs = json.loads(Path(jobs_file).read_text())
 cap = jobs.pop("_capsule")
+caps = cap if isinstance(cap, list) else [cap]  # several copies of a capsule = several machine pools
 state = json.loads(Path(state_file).read_text()) if Path(state_file).exists() else {}
 for n in jobs:
     state.setdefault(n, {"tries": 0, "status": "pending", "ids": []})
@@ -56,15 +58,19 @@ while True:
         else:
             s["status"] = f"{r.get('end_status')} ({'results' if r.get('has_results') else 'NO RESULTS'}, {r.get('run_time', 0) / 60:.0f} min)"
             print(time.strftime("%I:%M %p"), n, s["status"], flush=True)
-    for n, s in state.items():
-        if s["status"] == "pending" and running < limit:
-            r = api("/computations", {"capsule_id": cap} | jobs[n])
-            s["ids"].append(r["id"])
-            s["tries"] += 1
-            s["status"] = "running"
-            running += 1
-            print(time.strftime("%I:%M %p"), n, "launched", r["id"], flush=True)
-            break  # one launch per cycle, so launches are --gap apart and failures are seen early
+    pending = [n for n, s in state.items() if s["status"] == "pending"]
+    for c in caps:  # one launch per capsule per cycle, so launches are --gap apart
+        if not pending or running >= limit:
+            break
+        n = pending.pop(0)
+        s = state[n]
+        r = api("/computations", {"capsule_id": c} | jobs[n])
+        s["ids"].append(r["id"])
+        s.setdefault("capsules", []).append(c)
+        s["tries"] += 1
+        s["status"] = "running"
+        running += 1
+        print(time.strftime("%I:%M %p"), n, "launched", r["id"], "on", c[:8], flush=True)
     Path(state_file).write_text(json.dumps(state, indent=1))
     if all(s["status"] not in ("pending", "running") for s in state.values()):
         break
