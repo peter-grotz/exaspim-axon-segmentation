@@ -32,6 +32,7 @@ KEEP = (
     "environment/environment.yml",  # Code Ocean credentials (newer format of secrets.json)
     ".codeocean/environment.json",  # written by Code Ocean after each environment build
     "metadata/metadata.yml",  # capsule name/description edited in the Code Ocean UI
+    ".codeocean/resources.json",  # machine type, chosen in the Code Ocean UI
     "code/*.ipynb",
 )
 WEIGHTS = "trailmap-axon-210409"
@@ -107,7 +108,7 @@ def main() -> None:
     clear(capsule)
     for src in TEMPLATE.rglob("*"):
         rel = src.relative_to(TEMPLATE)
-        if src.is_dir() or rel.name == "postInstall.in":
+        if src.is_dir() or rel.name == "postInstall.in" or _kept(str(rel)):
             continue
         dst = capsule / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
