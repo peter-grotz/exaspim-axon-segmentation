@@ -64,13 +64,14 @@ for f in tiles:
     checked += tc.get("checked", 0)
     if not d.get("complete"):
         problems.append(f"{f.parent.name}: not complete")
-    if n:
+    scored = sum("skipped" not in b.get("native", {}) for b in d["blocks"])  # skipped: no outputs
+    if scored:
         names = {i["name"] for i in ls(f"snr_tiles/{f.parent.name}")}
         if "probability.zarr" not in names:
             problems.append(f"{f.parent.name}: no probability.zarr")
-        if sum(x.endswith("_hist.npz") for x in names) != n:
+        if sum(x.endswith("_hist.npz") for x in names) != scored:
             problems.append(
-                f"{f.parent.name}: histograms for {sum(x.endswith('_hist.npz') for x in names)} of {n} blocks"
+                f"{f.parent.name}: histograms for {sum(x.endswith('_hist.npz') for x in names)} of {scored} scored blocks"
             )
     rows.append((f.parent.name, n, tc.get("checked"), tc.get("rejected"), d.get("selection")))
 missing = sorted(set(remote) - {f.parent.name for f in tiles})
