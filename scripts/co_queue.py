@@ -1,6 +1,6 @@
 """Launch Code Ocean computations with at most N running at once (relaunching fast failures).
 
-Usage: uv run python scripts/co_queue.py <token file> <jobs.json> <state.json> [--max 8] [--gap 20]
+Usage: uv run python scripts/co_queue.py <token file> <jobs.json> <state.json> [--max 8] [--gap 20] [--tries 3]
 jobs.json: {name: {"parameters": [...], "data_assets": [...]}}; capsule id inside as "_capsule".
 A run that ends "failed" with no results within 5 minutes is treated as not started and retried
 (up to 3 times). Launches are --gap seconds apart. State (run ids, outcomes) is written to
@@ -17,6 +17,7 @@ from pathlib import Path
 tok, jobs_file, state_file = sys.argv[1:4]
 limit = int(sys.argv[sys.argv.index("--max") + 1]) if "--max" in sys.argv else 8
 gap = float(sys.argv[sys.argv.index("--gap") + 1]) if "--gap" in sys.argv else 20
+tries = int(sys.argv[sys.argv.index("--tries") + 1]) if "--tries" in sys.argv else 3
 auth = "Basic " + base64.b64encode(f"{Path(tok).read_text().strip()}:".encode()).decode()
 B = "https://codeocean.allenneuraldynamics.org/api/v1"
 
@@ -48,7 +49,7 @@ while True:
             running += 1
             continue
         quick_fail = r.get("end_status") == "failed" and not r.get("has_results") and r.get("run_time", 0) < 300
-        if quick_fail and s["tries"] < 3:
+        if quick_fail and s["tries"] < tries:
             s["status"] = "pending"
             print(time.strftime("%H:%M"), n, "failed to start; will retry", flush=True)
         else:
