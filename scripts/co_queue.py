@@ -2,8 +2,8 @@
 
 Usage: uv run python scripts/co_queue.py <token file> <jobs.json> <state.json> [--max 8] [--gap 20] [--tries 3]
 jobs.json: {name: {"parameters": [...], "data_assets": [...]}}; capsule id inside as "_capsule".
-A run that ends "failed" with no results within 5 minutes is treated as not started and retried
-(up to 3 times). Launches are --gap seconds apart. State (run ids, outcomes) is written to
+A run that ends "failed" with no results is treated as not started and retried (--tries times;
+Code Ocean counts the wait for a machine as run time, so these can take several minutes). Launches are --gap seconds apart. State (run ids, outcomes) is written to
 state.json after every poll.
 """
 
@@ -48,13 +48,14 @@ while True:
         if r["state"] != "completed":
             running += 1
             continue
-        quick_fail = r.get("end_status") == "failed" and not r.get("has_results") and r.get("run_time", 0) < 300
+        # no results at all: never ran (no machine, or a start-up failure); safe to relaunch
+        quick_fail = r.get("end_status") == "failed" and not r.get("has_results")
         if quick_fail and s["tries"] < tries:
             s["status"] = "pending"
-            print(time.strftime("%H:%M"), n, "failed to start; will retry", flush=True)
+            print(time.strftime("%I:%M %p"), n, "failed to start; will retry", flush=True)
         else:
             s["status"] = f"{r.get('end_status')} ({'results' if r.get('has_results') else 'NO RESULTS'}, {r.get('run_time', 0) / 60:.0f} min)"
-            print(time.strftime("%H:%M"), n, s["status"], flush=True)
+            print(time.strftime("%I:%M %p"), n, s["status"], flush=True)
     for n, s in state.items():
         if s["status"] == "pending" and running < limit:
             r = api("/computations", {"capsule_id": cap} | jobs[n])
@@ -62,11 +63,10 @@ while True:
             s["tries"] += 1
             s["status"] = "running"
             running += 1
-            print(time.strftime("%H:%M"), n, "launched", r["id"], flush=True)
-            Path(state_file).write_text(json.dumps(state, indent=1))
-            time.sleep(gap)
+            print(time.strftime("%I:%M %p"), n, "launched", r["id"], flush=True)
+            break  # one launch per cycle, so launches are --gap apart and failures are seen early
     Path(state_file).write_text(json.dumps(state, indent=1))
     if all(s["status"] not in ("pending", "running") for s in state.values()):
         break
-    time.sleep(300)
+    time.sleep(gap)
 print("all done")
