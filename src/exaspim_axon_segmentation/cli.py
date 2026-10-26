@@ -562,19 +562,35 @@ def snr_tiles_cmd(
         for p in fs.ls(mbase.removeprefix("s3://")):
             masks[stem(p.rstrip("/").split("/")[-1])] = "s3://" + p.rstrip("/")
         log.info("%d tile masks in %s", len(masks), mask_root)
+    # the flat-field step's 8x-downsampled mask copies, where it saved them (same mask, 6 MB)
+    low_res = {}
+    if mask_root and "/flatfield_correction/" in mask_root:
+        art = mask_root.split("/flatfield_correction/")[0] + "/flatfield_correction/artifacts"
+        try:
+            for d in fs.ls(art.removeprefix("s3://")):
+                for p in fs.ls(d):
+                    leaf = p.rstrip("/").split("/")[-1]
+                    if leaf.endswith("_mask_low_res.zarr"):
+                        low_res[stem(leaf)] = "s3://" + p.rstrip("/")
+        except FileNotFoundError:
+            pass
+        log.info("%d low-resolution mask copies in %s", len(low_res), art)
     bin_ = 32
 
     def prepare(name):
         """Block centres for one tile: from its brain mask, else from bright structure."""
         url = f"{base}/{name}"
         if stem(name) in masks:
-            frac, st = mask_fraction(masks[stem(name)], bin=bin_)
+            frac, st = mask_fraction(masks[stem(name)], bin=bin_, low_res=low_res.get(stem(name)))
             _, _, sc0, tr0 = open_ome(url, 0)
             bins = np.maximum(np.round(np.asarray(size) / (sc0 * bin_)).astype(int), 1)
             starts, fr = blocks_from_fraction(frac, bins, n_blocks, min_tissue=min_tissue,
                                               seed=names.index(name))  # fmt: skip
+            n_ok = len(blocks_from_fraction(frac, bins, 10**9, min_tissue=min_tissue)[0])
             centres = tr0 + ((starts + bins / 2) * bin_) * sc0
-            return centres, fr, {"selection": "brain mask", "mask": masks[stem(name)]} | st
+            return centres, fr, {"selection": "brain mask", "mask": masks[stem(name)],
+                                 "low_res_mask": low_res.get(stem(name)),
+                                 "n_qualifying_blocks": n_ok} | st  # fmt: skip
         # no brain mask: random non-overlapping blocks anywhere in the tile, flagged with "*"
         _, _, sc0, tr0 = open_ome(url, 0)
         shape0 = np.asarray(open_ome(url, 0)[0].shape[-3:])

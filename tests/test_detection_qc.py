@@ -44,3 +44,33 @@ def test_stretched_noise_is_a_false_detection():
     q = block_qc(raw, _detector(0.3), stretched, shared_scaling=IntensityScaling(300, 600))
     assert q["verdict"] == "false_detection", q
     assert {"contrast", "noise_control", "normalization"} & set(q["failed"])
+
+
+def test_sparse_dilation_matches_full():
+    from scipy.ndimage import binary_dilation
+
+    from exaspim_axon_segmentation.qc.detection_qc import sparse_dilation
+
+    rng = np.random.default_rng(1)
+    for shape, density, it in (
+        ((70, 90, 130), 1e-4, 2),
+        ((64, 64, 64), 3e-3, 6),
+        ((50, 129, 65), 0.02, 8),
+    ):
+        m = rng.random(shape) < density
+        m[0, 0, 0] = m[-1, -1, -1] = True  # corners: dilation clipped at the border
+        assert np.array_equal(sparse_dilation(m, it, cell=32), binary_dilation(m, iterations=it))
+
+
+def test_clipped_histogram_matches_values():
+    from exaspim_axon_segmentation.qc import detection_qc as q
+
+    rng = np.random.default_rng(2)
+    v = np.concatenate([rng.normal(100, 5, 200_000), rng.normal(900, 50, 3_000)])
+    v = np.clip(np.round(v), 0, None).astype(np.float32)
+    ref = v.astype(np.float64)
+    for _ in range(5):
+        m, sd = ref.mean(), ref.std()
+        ref = ref[np.abs(ref - m) <= 3 * sd]
+    m, sd = q._clipped(v)
+    assert np.isclose(m, ref.mean(), rtol=1e-12) and np.isclose(sd, ref.std(), rtol=1e-12)

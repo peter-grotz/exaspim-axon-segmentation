@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 import zarr
 from numpy.typing import NDArray
-from scipy.ndimage import binary_dilation, binary_erosion, zoom
+from scipy.ndimage import binary_erosion, zoom
 
 log = logging.getLogger(__name__)
 
@@ -212,33 +212,34 @@ def score(raw: NDArray[np.float32], prob: NDArray[np.float32], config: SnrConfig
 
     Means and SDs use every voxel; percentiles and medians use a 2 M-voxel random subset.
     """
+    return _score(raw, prob, config)[0]
+
+
+def _score(raw, prob, config: SnrConfig) -> tuple[dict, NDArray[np.bool_]]:
+    """:func:`score` and the guarded detections (reused by the QC)."""
+    from exaspim_axon_segmentation.qc.detection_qc import _clipped, sparse_dilation
+
     axon = prob >= config.axon_p
-    guard = binary_dilation(axon, iterations=config.guard_vox) if axon.any() else axon
+    guard = sparse_dilation(axon, config.guard_vox)
     outside = np.percentile(_sub(raw), config.outside_pct)
     bg = ~guard & (raw > outside)
     out = {"axon_voxels": int(axon.sum()), "axon_fraction": float(axon.mean())}
     if axon.sum() < 50 or bg.sum() < 1000:
-        return out | {"signal": None, "background": None, "noise_sd": None, "snr": None}
-    values = raw[bg].astype(np.float64)
-    for _ in range(5):  # sigma-clip the background
-        m, sd = values.mean(), values.std()
-        values = values[np.abs(values - m) <= 3 * sd]
-    s, b, sd = float(raw[axon].mean()), float(values.mean()), float(values.std())
-    bgv = _sub(raw[bg])
+        return out | {"signal": None, "background": None, "noise_sd": None, "snr": None}, guard
+    bgv_all = raw[bg]
+    b, sd = _clipped(bgv_all)  # sigma-clipped background
+    s = float(raw[axon].mean())
+    bgv = _sub(bgv_all)
     sm, bm = float(np.median(_sub(raw[axon]))), float(np.median(bgv))
     sdm = float(1.4826 * np.median(np.abs(bgv - bm)))
     step = int(np.gcd.reduce(np.unique(raw[::4, ::4, ::4].astype(np.int64))[:5000]))
     # local background: a thin shell around the detections, so gradients/stripes far away do not
     # count as noise
-    shell = binary_dilation(guard, iterations=config.shell_vox) & ~guard
+    shell = sparse_dilation(guard, config.shell_vox) & ~guard
     shell &= raw > outside
     local = {"local_background": None, "local_noise_sd": None, "local_snr": None}
     if shell.sum() >= 1000:
-        lv = raw[shell].astype(np.float64)
-        for _ in range(5):
-            m, d = lv.mean(), lv.std()
-            lv = lv[np.abs(lv - m) <= 3 * d]
-        lb, lsd = float(lv.mean()), float(lv.std())
+        lb, lsd = _clipped(raw[shell])
         local = {
             "local_background": lb,
             "local_noise_sd": lsd,
@@ -246,7 +247,7 @@ def score(raw: NDArray[np.float32], prob: NDArray[np.float32], config: SnrConfig
         }
     whole = {"signal": s, "background": b, "noise_sd": sd, "snr": (s - b) / max(sd, 1e-6),
              "median_snr": (sm - bm) / max(sdm, 1e-6), "quantization_step": step}  # fmt: skip
-    return out | whole | local
+    return out | whole | local, guard
 
 
 def _block_boxes(shape, scale, translation, centres_um, block_um) -> list[tuple[NDArray, NDArray]]:
@@ -410,19 +411,23 @@ def snr_blocks(
                 "voxel_um": np.asarray(vox).tolist(),
                 "scaling": [scaling.offset, scaling.scale],
             }
-            row[name] = score(vol, prob, config) | extra
+            metrics, guard = _score(vol, prob, config)
+            row[name] = metrics | extra
             laps.lap("score")
             if config.save_histograms:
                 det = prob >= config.axon_p
                 dn = np.clip(vol, 0, 65535).astype(np.uint16)
-                fg = np.bincount(dn[det], minlength=65536).astype(np.uint32)
-                bg = np.bincount(dn[~det], minlength=65536).astype(np.uint32)
+                fg = np.bincount(dn[det], minlength=65536)
+                bg = (np.bincount(dn.ravel(), minlength=65536) - fg).astype(np.uint32)
+                fg = fg.astype(np.uint32)
                 np.savez_compressed(out_dir / f"block{k:03d}_{name}_hist.npz", foreground=fg,
                                     background=bg)  # fmt: skip
                 laps.lap("histograms")
             if config.qc and name == "native":
-                row[name]["qc"] = block_qc(vol, predict, scaling, shared_scaling=shared, prob=prob,
-                                           config=qc_cfg)  # fmt: skip
+                same = qc_cfg.axon_p == config.axon_p and qc_cfg.guard_vox == config.guard_vox
+                row[name]["qc"] = block_qc(vol, predict, scaling, shared_scaling=shared,
+                                           prob=prob, config=qc_cfg,
+                                           guard=guard if same else None)  # fmt: skip
                 laps.lap("qc")
             p8 = np.round(prob * 255).astype(np.uint8)
             if probability is not None and name == "native":
