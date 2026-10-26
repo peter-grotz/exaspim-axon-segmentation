@@ -539,7 +539,7 @@ def snr_tiles_cmd(
     import numpy as np
 
     from exaspim_axon_segmentation.qc.tile_mask import blocks_from_fraction, mask_fraction
-    from exaspim_axon_segmentation.snr import SnrConfig, open_ome, snr_blocks
+    from exaspim_axon_segmentation.snr import SnrConfig, open_ome, prefetch_first_block, snr_blocks
 
     fs = (
         fsspec.filesystem("s3", anon=True)
@@ -585,6 +585,11 @@ def snr_tiles_cmd(
         centres = tr0 + ((starts + bins / 2) * bin_) * sc0
         return centres, np.full(len(centres), np.nan), {"selection": "unmasked*"}
 
+    def prepare_and_prefetch(name):  # block selection and the tile's first block, read ahead
+        centres, frac, sel = prepare(name)
+        first = prefetch_first_block(f"{base}/{name}", centres, cfg, weights, level=level)
+        return centres, frac, sel, first
+
     todo = []
     for name in names:
         done = out / stem(name) / "snr_blocks.json"
@@ -593,16 +598,16 @@ def snr_tiles_cmd(
             continue
         todo.append(name)
     with ThreadPoolExecutor(1) as pool:  # the next tile's mask is read while this one predicts
-        futures = {todo[0]: pool.submit(prepare, todo[0])} if todo else {}
+        futures = {todo[0]: pool.submit(prepare_and_prefetch, todo[0])} if todo else {}
         for i, name in enumerate(todo):
             if i + 1 < len(todo):
-                futures[todo[i + 1]] = pool.submit(prepare, todo[i + 1])
+                futures[todo[i + 1]] = pool.submit(prepare_and_prefetch, todo[i + 1])
             url = f"{base}/{name}"
             tdir = out / stem(name)
             done = tdir / "snr_blocks.json"
             t_wait = _time.time()
             try:
-                centres, frac, sel = futures.pop(name).result()
+                centres, frac, sel, first = futures.pop(name).result()
             except Exception as error:
                 log.warning("%s: block selection failed (%s); skipped", name, error)
                 continue
@@ -612,7 +617,8 @@ def snr_tiles_cmd(
                     "n_tissue_blocks": len(centres),
                     "tissue_fraction": np.round(frac, 3).tolist()} | sel  # fmt: skip
             if len(centres):
-                snr_blocks(url, centres, tdir, weights, cfg, level=level, device=device)
+                snr_blocks(url, centres, tdir, weights, cfg, level=level, device=device,
+                           first=first)  # fmt: skip
             summary = _json.loads(done.read_text()) if done.exists() else {"blocks": []}
             done.write_text(_json.dumps(summary | meta | {"complete": True}, indent=1))
             log.info("%s: %d tissue blocks scored (%s)", name, len(centres), sel["selection"])
