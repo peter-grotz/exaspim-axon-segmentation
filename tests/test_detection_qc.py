@@ -74,3 +74,13 @@ def test_clipped_histogram_matches_values():
         ref = ref[np.abs(ref - m) <= 3 * sd]
     m, sd = q._clipped(v)
     assert np.isclose(m, ref.mean(), rtol=1e-12) and np.isclose(sd, ref.std(), rtol=1e-12)
+
+
+def test_ordered_blocks_starts_with_the_same_pick():
+    from exaspim_axon_segmentation.qc.tile_mask import blocks_from_fraction, ordered_blocks
+
+    frac = np.ones((40, 40, 40), np.float32)
+    frac[:, :10] = 0
+    a, _ = blocks_from_fraction(frac, (5, 5, 5), 12, seed=7)
+    b, _ = ordered_blocks(frac, (5, 5, 5), 12, seed=7)
+    assert np.array_equal(a, b[:12]) and len(np.unique(b, axis=0)) == len(b) > 12
