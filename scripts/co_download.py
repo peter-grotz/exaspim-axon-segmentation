@@ -2,7 +2,8 @@
 
 Usage: uv run python scripts/co_download.py <token file> <computation id> <dest> <folder>...
 
-Zarr folders (e.g. an expand run's probability.zarr) are skipped unless --zarr is given.
+Zarr folders (e.g. an expand run's probability.zarr) are skipped unless --zarr is given;
+--no-npz skips .npz files (e.g. snr-tiles preview MIPs).
 """
 
 import base64
@@ -16,7 +17,8 @@ from pathlib import Path
 
 token = Path(sys.argv[1]).read_text().strip()
 with_zarr = "--zarr" in sys.argv
-cid, dest, roots = sys.argv[2], sys.argv[3], [a for a in sys.argv[4:] if a != "--zarr"]
+skip_npz = "--no-npz" in sys.argv  # e.g. snr-tiles preview MIPs
+cid, dest, roots = sys.argv[2], sys.argv[3], [a for a in sys.argv[4:] if a not in ("--zarr", "--no-npz")]
 BASE = "https://codeocean.allenneuraldynamics.org/api/v1"
 AUTH = "Basic " + base64.b64encode(f"{token}:".encode()).decode()
 
@@ -38,7 +40,7 @@ while stack:
         if item["type"] == "folder":
             if with_zarr or not item["path"].endswith(".zarr"):
                 stack.append(item["path"])
-        else:
+        elif not (skip_npz and item["path"].endswith(".npz")):
             files.append(item["path"])
 
 
