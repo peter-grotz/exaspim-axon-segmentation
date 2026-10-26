@@ -1,9 +1,10 @@
 """Launch Code Ocean computations with at most N running at once (relaunching fast failures).
 
-Usage: uv run python scripts/co_queue.py <token file> <jobs.json> <state.json> [--max 8]
+Usage: uv run python scripts/co_queue.py <token file> <jobs.json> <state.json> [--max 8] [--gap 20]
 jobs.json: {name: {"parameters": [...], "data_assets": [...]}}; capsule id inside as "_capsule".
 A run that ends "failed" with no results within 5 minutes is treated as not started and retried
-(up to 3 times). State (run ids, outcomes) is written to state.json after every poll.
+(up to 3 times). Launches are --gap seconds apart. State (run ids, outcomes) is written to
+state.json after every poll.
 """
 
 import base64
@@ -15,6 +16,7 @@ from pathlib import Path
 
 tok, jobs_file, state_file = sys.argv[1:4]
 limit = int(sys.argv[sys.argv.index("--max") + 1]) if "--max" in sys.argv else 8
+gap = float(sys.argv[sys.argv.index("--gap") + 1]) if "--gap" in sys.argv else 20
 auth = "Basic " + base64.b64encode(f"{Path(tok).read_text().strip()}:".encode()).decode()
 B = "https://codeocean.allenneuraldynamics.org/api/v1"
 
@@ -60,7 +62,8 @@ while True:
             s["status"] = "running"
             running += 1
             print(time.strftime("%H:%M"), n, "launched", r["id"], flush=True)
-            time.sleep(20)
+            Path(state_file).write_text(json.dumps(state, indent=1))
+            time.sleep(gap)
     Path(state_file).write_text(json.dumps(state, indent=1))
     if all(s["status"] not in ("pending", "running") for s in state.values()):
         break
