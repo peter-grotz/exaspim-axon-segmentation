@@ -80,7 +80,7 @@ fig, axes = plt.subplots(1, 2, figsize=(22, 10), gridspec_kw={"width_ratios": [1
 views = [("top view (max over z)", "mip_xy", (1, 2), "y (mm)"),
          ("side view (max over y)", "mip_zx", (0, 2), "z (mm)")]  # fmt: skip
 allv = np.concatenate([t["z"]["mip_xy"].ravel() for t in tiles])
-lo, hi = np.percentile(allv, 1), np.percentile(allv, 99.7)
+lo, hi = np.percentile(allv, 30), np.percentile(allv, 99.9)
 half = BLOCK_UM / 2
 for ax, (title, key, (ra, ca), ylab) in zip(axes, views, strict=True):
     for t in tiles:  # image, drawn in stage coordinates; overlaps: later tiles on top
@@ -88,7 +88,7 @@ for ax, (title, key, (ra, ca), ylab) in zip(axes, views, strict=True):
         sc, tr = t["z"]["sc"], t["z"]["tr"]
         e = [tr[ca] / 1e3, (tr[ca] + img.shape[1] * sc[ca]) / 1e3,
              (tr[ra] + img.shape[0] * sc[ra]) / 1e3, tr[ra] / 1e3]  # fmt: skip
-        ax.imshow(img, cmap="gray", extent=e, interpolation="nearest", zorder=1, alpha=0.9)
+        ax.imshow(img, cmap="gray", extent=e, interpolation="nearest", zorder=1)
     for t in tiles:  # brain mask outline per tile
         if t["frac"] is None:
             continue
@@ -105,9 +105,9 @@ for ax, (title, key, (ra, ca), ylab) in zip(axes, views, strict=True):
                 color=A.BRAND["orange"], fontsize=11, va="top", ha="left", zorder=6,
                 fontfamily=A.HEAD, fontweight="bold")  # fmt: skip
     for t in tiles:  # qualifying blocks (outlines) and sampled blocks (filled)
-        for pts, kw in ((t["qual"], {"fill": False, "ec": A.BRAND["blue"], "lw": 0.5, "alpha": 0.35}),
+        for pts, kw in ((t["qual"], {"fill": False, "ec": A.BRAND["blue"], "lw": 0.4, "alpha": 0.3}),
                         (t["sampled"], {"fill": True, "fc": A.BRAND["violet"], "ec": A.BRAND["violet"],
-                                        "lw": 0.8, "alpha": 0.22})):  # fmt: skip
+                                        "lw": 0.8, "alpha": 0.12})):  # fmt: skip
             for c in pts:
                 ax.add_patch(Rectangle(((c[ca] - half[ca]) / 1e3, (c[ra] - half[ra]) / 1e3),
                                        BLOCK_UM[ca] / 1e3, BLOCK_UM[ra] / 1e3, zorder=5, **kw))  # fmt: skip
