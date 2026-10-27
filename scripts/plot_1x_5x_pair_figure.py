@@ -72,7 +72,9 @@ def block_preview(sid, tile, block):
 
 A.apply_style("white")
 fig = plt.figure(figsize=(30, 7.2 * len(specs)))
-outer = fig.add_gridspec(len(specs), 4, width_ratios=[2.4, 2.4, 1.4, 0.8], wspace=0.16, hspace=0.3)
+outer = fig.add_gridspec(
+    len(specs), 5, width_ratios=[2.4, 2.4, 1.4, 0.8, 0.5], wspace=0.18, hspace=0.3
+)
 for r, spec in enumerate(specs):
     sid, cache, one, five = spec.split(":")
     # 1x slab
@@ -167,13 +169,31 @@ for r, spec in enumerate(specs):
     axb.set_xticklabels(["1x", "5x"])
     axb.set_ylim(0, SNR_MAX * 1.05)
     A.style_ax(axb, title=f"{sid}", ylabel="block SNR", title_size=13)
+    # ratio of medians, 5x / 1x, with a bootstrap 95% interval (blocks resampled within each scope)
+    axr = fig.add_subplot(outer[r, 4])
+    boot = [
+        np.median(rng.choice(v5, len(v5))) / np.median(rng.choice(v1, len(v1))) for _ in range(2000)
+    ]
+    ratio_m = np.median(v5) / np.median(v1)
+    lo_r, hi_r = np.percentile(boot, [2.5, 97.5])
+    axr.bar([0], [ratio_m], width=0.6, color=A.BRAND["violet"], alpha=0.6)
+    axr.errorbar(
+        [0], [ratio_m], yerr=[[ratio_m - lo_r], [hi_r - ratio_m]], color=A.C["ink"], capsize=6
+    )
+    A.value_label(axr, 0, hi_r, f"{ratio_m:.1f}x", size=16)
+    axr.set_xticks([0])
+    axr.set_xticklabels(["5x / 1x"])
+    axr.set_xlim(-0.6, 0.6)
+    axr.set_ylim(0, max(6.0, hi_r * 1.25))
+    A.style_ax(axr, title="SNR ratio", ylabel="median 5x / median 1x", title_size=13)
 fig.suptitle(A.safe(f"same-day 1x vs 5x / TRAILMAP detections and block SNR at p >= {t:g}"), x=0.01,
              ha="left", fontfamily=A.HEAD, fontweight="bold", fontsize=22)  # fmt: skip
 fig.text(0.01, 0.005, A.safe(
     "1x: binned scan (tile_000000), 1x fine-tuned TRAILMAP, 20 x 15 x 15 um, 200 um slab at mid depth; "
     "SNR from 300 random tissue blocks · 5x: v2 TRAILMAP at level 2 (4 x 3 x 3 um), snr-tiles blocks "
     "rescored at the threshold; 5x was segmented in sampled blocks only (no whole-brain 5x detection map): "
-    "blocks shown as 1.44 mm footprints coloured by SNR (0-120, magma) · boxes: 25-75%, dots: blocks · magenta: max probability >= threshold · SNR > "
+    "blocks shown as 1.44 mm footprints coloured by SNR (0-120, magma) · boxes: 25-75%, dots: blocks · "
+    "ratio: median 5x SNR / median 1x SNR, bar = 95% bootstrap interval · magenta: max probability >= threshold · SNR > "
     f"{SNR_MAX} in the last bin"), fontsize=10, color=A.C["muted"])  # fmt: skip
 A.savefig(fig, out, dpi=80)
 print("saved", out)
