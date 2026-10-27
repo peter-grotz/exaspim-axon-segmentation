@@ -32,6 +32,9 @@ sys.path.insert(0, "/Users/peter.grotz/.claude/skills/allen-plotting-style/scrip
 import allen_style as A  # noqa: E402
 
 root, cache, out = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+LABEL = (
+    sys.argv[4] if len(sys.argv) > 4 else "p >= 0.5"
+)  # detection threshold, shown in every title
 MIP_LEVEL = 7
 C1 = {"665465", "719653", "787423", "852470", "853533"}  # cluster 1 (user's grouping)
 UNASSIGNED = {"787425"}
@@ -130,7 +133,7 @@ for ax in axs[:, 0]:
     ax.set_ylabel("fraction of blocks", fontsize=9)
 for ax in axs[-1]:
     ax.set_xlabel("block SNR", fontsize=9)
-fig.suptitle(A.safe("axon SNR per block, by sample/"), x=0.01, ha="left", fontfamily=A.HEAD,
+fig.suptitle(A.safe(f"axon SNR per block, by sample · {LABEL}/"), x=0.01, ha="left", fontfamily=A.HEAD,
              fontsize=20)  # fmt: skip
 fig.text(0.01, 0.005, A.safe(note + f" · solid: left hemisphere, dashed: right (each normalized to its own n; blocks within 0.72 mm of the estimated midline left out) · SNR > {SNR_MAX} "
                              "counted in the last bin"), fontsize=9,
@@ -170,7 +173,7 @@ for ax in axs[:, 0]:
     ax.set_ylabel("block SNR", fontsize=9)
 for ax in axs[-1]:
     ax.set_xlabel("tile index", fontsize=9)
-fig.suptitle(A.safe("axon SNR per block, by tile/"), x=0.01, ha="left", fontfamily=A.HEAD,
+fig.suptitle(A.safe(f"axon SNR per block, by tile · {LABEL}/"), x=0.01, ha="left", fontfamily=A.HEAD,
              fontsize=20)  # fmt: skip
 fig.text(0.01, 0.005, A.safe(note + f" · dots: blocks, bar: tile median, triangles: SNR > {SNR_MAX} · tiles grouped by hemisphere (where most of their blocks lie relative to the estimated midline), teal line between"),
          fontsize=9,
@@ -234,7 +237,7 @@ for i, s in enumerate(order):
 ax.set_xticks(range(len(order)))
 ax.set_xticklabels([label[s] for s in order], rotation=45, ha="right", fontsize=9)
 ax.set_ylim(0, None)
-A.style_ax(ax, title="left vs right hemisphere, block SNR", ylabel="block SNR")
+A.style_ax(ax, title=f"left vs right hemisphere, block SNR · {LABEL}", ylabel="block SNR")
 fig.text(0.01, 0.005, A.safe("filled circle: left, open square: right (median and 25-75%) · L/R: ratio "
                              "of medians, * Mann-Whitney p < 0.01 · midline halfway between the outermost tissue "
                              "blocks in y along x (rough estimate); blocks within 0.72 mm of it excluded · left/right from each "
@@ -302,7 +305,7 @@ for k, s in enumerate(order):
 sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
 cb = fig.colorbar(sm, ax=axs.ravel().tolist(), fraction=0.015, pad=0.01)
 cb.set_label("tile median block SNR", fontsize=10)
-fig.suptitle(A.safe("median axon SNR per tile/"), x=0.01, ha="left", fontfamily=A.HEAD,
+fig.suptitle(A.safe(f"median axon SNR per tile · {LABEL}/"), x=0.01, ha="left", fontfamily=A.HEAD,
              fontsize=20)  # fmt: skip
 fig.text(0.01, 0.005, A.safe(note + " · top view, MIP over z at level 7 (log), tiles by stage "
                              "coordinates (they overlap ~15%) · number: tile median, n blocks · "

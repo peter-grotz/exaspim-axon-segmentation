@@ -23,11 +23,13 @@ sys.path.insert(0, "/Users/peter.grotz/.claude/skills/allen-plotting-style/scrip
 import allen_style as A  # noqa: E402
 
 root, cache, out = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+LABEL = sys.argv[4] if len(sys.argv) > 4 else "p >= 0.5"
+VMAX = float(sys.argv[5]) if len(sys.argv) > 5 else 60.0
 C1 = {"665465", "719653", "787423", "852470", "853533"}
 HALF = np.array([1440.0, 1440.0]) / 2  # y, x
 subjects = sorted((p.name for p in root.iterdir() if (p / "snr_tiles").is_dir()),
                   key=lambda s: (0 if s in C1 else 2 if s == "787425" else 1, s))  # fmt: skip
-norm = Normalize(0, 60)
+norm = Normalize(0, VMAX)
 cmap = plt.get_cmap("magma")
 A.apply_style("white")
 ncol = 4  # brains per row; each is two panels: image | blocks
@@ -80,8 +82,8 @@ for k, s in enumerate(subjects):
                  color=A.BRAND["blue"] if s in C1 else A.BRAND["orange"])  # fmt: skip
 cb = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axs.ravel().tolist(),
                   fraction=0.012, pad=0.01)  # fmt: skip
-cb.set_label("block SNR (capped at 60)", fontsize=10)
-fig.suptitle(A.safe(f"SNR blocks per brain / {root.name}"), x=0.01, ha="left", fontfamily=A.HEAD,
+cb.set_label(f"block SNR (capped at {VMAX:g})", fontsize=10)
+fig.suptitle(A.safe(f"SNR blocks per brain · {LABEL}/"), x=0.01, ha="left", fontfamily=A.HEAD,
              fontweight="bold", fontsize=20)  # fmt: skip
 fig.text(0.01, 0.005, A.safe("top view, max over z of the raw tiles (level 7) · orange dashed: tiles · "
                              "each sampled 1.28 x 1.44 x 1.44 mm block as its y-x footprint, coloured "
