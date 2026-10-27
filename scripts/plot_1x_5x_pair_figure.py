@@ -192,7 +192,7 @@ for r, spec in enumerate(specs):
     axr.set_xlim(-0.6, 0.6)
     axr.set_ylim(0, max(6.0, hi_r * 1.25))
     A.style_ax(axr, title="SNR ratio", ylabel="median 5x / median 1x", title_size=13)
-fig.suptitle(A.safe(f"same-day 1x vs 5x / TRAILMAP detections and block SNR at p >= {t:g}"), x=0.01,
+fig.suptitle(A.safe(f"1x vs 5x SNR · p >= {t:g}/"), x=0.01,
              ha="left", fontfamily=A.HEAD, fontweight="bold", fontsize=22)  # fmt: skip
 fig.text(0.01, 0.005, A.safe(
     "1x: binned scan (tile_000000), 1x fine-tuned TRAILMAP, 20 x 15 x 15 um, 200 um slab at mid depth; "
