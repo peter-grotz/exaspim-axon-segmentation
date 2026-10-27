@@ -72,9 +72,11 @@ def block_preview(sid, tile, block):
 
 A.apply_style("white")
 fig = plt.figure(figsize=(30, 7.2 * len(specs)))
-outer = fig.add_gridspec(
-    len(specs), 5, width_ratios=[2.4, 2.4, 1.4, 0.8, 0.5], wspace=0.18, hspace=0.3
-)
+outer = fig.add_gridspec(len(specs), 5, width_ratios=[2.4, 2.4, 1.4, 0.8, 0.5], wspace=0.18,
+                         hspace=0.3, left=0.12, right=0.99)  # fmt: skip
+# genotype per sample, from the ExM Dataset Summary sheet (results/exm_dataset_summary.json)
+sheet = json.loads(Path("results/exm_dataset_summary.json").read_text())
+GENOTYPE = {str(d.get("Sample")).split("_")[0]: d.get("Genotype") for d in sheet}
 for r, spec in enumerate(specs):
     sid, cache, one, five = spec.split(":")
     # 1x slab
@@ -84,6 +86,10 @@ for r, spec in enumerate(specs):
     s0, s1 = z["slab"]
     ext = [0, slab.shape[1] * VOX1[2] / 1e3, slab.shape[0] * VOX1[1] / 1e3, 0]
     gl = outer[r, 0].subgridspec(1, 2, wspace=0.05)
+    pos = outer[r, 0].get_position(fig)
+    geno = (GENOTYPE.get(sid) or "genotype unknown").replace(" / ", "/\n").replace(" + ", " +\n")
+    fig.text(0.005, (pos.y0 + pos.y1) / 2, A.safe(f"{geno}\n{sid}"), ha="left", va="center",
+             fontsize=15, fontfamily=A.HEAD, fontweight="bold", color=A.C["ink"])  # fmt: skip
     for c, over in enumerate((None, overlay(slab >= t))):
         ax = fig.add_subplot(gl[0, c])
         ax.imshow(g, cmap="gray", extent=ext, interpolation="nearest")
