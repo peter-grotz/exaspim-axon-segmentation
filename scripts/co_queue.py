@@ -3,7 +3,8 @@
 Usage: uv run python scripts/co_queue.py <token file> <jobs.json> <state.json> [--max 8] [--gap 20] [--tries 3]
 jobs.json: {name: {"parameters": [...], "data_assets": [...]}}; capsule id (or a list of copies of
 the capsule on different machine types) inside as "_capsule".
-A run that ends "failed" with no results is treated as not started and retried (--tries times;
+Jobs wait until their data assets are ready. A run that ends "failed" with no results is treated
+as not started and retried (--tries times;
 Code Ocean counts the wait for a machine as run time, so these can take several minutes). Launches are --gap seconds apart. State (run ids, outcomes) is written to
 state.json after every poll.
 """
@@ -58,7 +59,10 @@ while True:
         else:
             s["status"] = f"{r.get('end_status')} ({'results' if r.get('has_results') else 'NO RESULTS'}, {r.get('run_time', 0) / 60:.0f} min)"
             print(time.strftime("%I:%M %p"), n, s["status"], flush=True)
-    pending = [n for n, s in state.items() if s["status"] == "pending"]
+    def assets_ready(job):  # a run whose data asset is still being prepared would fail to mount
+        return all(api(f"/data_assets/{a['id']}").get("state") == "ready" for a in job.get("data_assets", []))
+
+    pending = [n for n, s in state.items() if s["status"] == "pending" and assets_ready(jobs[n])]
     for c in caps:  # one launch per capsule per cycle, so launches are --gap apart
         if not pending or running >= limit:
             break
