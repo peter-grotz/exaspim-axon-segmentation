@@ -4,7 +4,7 @@ For each tile, up to N evenly spaced sampled blocks: raw MIP (own contrast) and 
 probability MIP overlaid (magenta, opacity = p, shown where p >= 0.5). The per-block previews
 (block###_native.npz: raw_mip, prob_mip at the segmentation level) are fetched from Code Ocean.
 
-Usage: uv run python scripts/plot_block_detections.py <token file> <subject> <computation id> <out.png> [N]
+Usage: uv run python scripts/plot_block_detections.py <token file> <subject> <computation id> <out.png> [N] [p]
 """
 
 import base64
@@ -26,6 +26,7 @@ import allen_style as A  # noqa: E402
 
 tok, sid, cid, out = sys.argv[1:5]
 per_tile = int(sys.argv[5]) if len(sys.argv) > 5 else 4
+thr = float(sys.argv[6]) if len(sys.argv) > 6 else 0.5
 auth = "Basic " + base64.b64encode(f"{Path(tok).read_text().strip()}:".encode()).decode()
 B = f"https://codeocean.allenneuraldynamics.org/api/v1/computations/{cid}/results/urls?path="
 jobs = []
@@ -61,15 +62,16 @@ for k, (name, b, raw, prob) in enumerate(res):
     a1.imshow(img, cmap="gray", interpolation="nearest")
     rgba = np.zeros((*prob.shape, 4))
     rgba[..., 0], rgba[..., 2] = 1.0, 1.0
-    rgba[..., 3] = np.where(prob >= 0.5, 0.35 + 0.6 * prob, 0)
+    rgba[..., 3] = np.where(prob >= thr, 0.9, 0)
     a1.imshow(rgba, interpolation="nearest")
     n = b["native"]
     snr = "-" if n.get("snr") is None else f"{n['snr']:.0f}"
     a0.set_title(A.safe(f"tile {int(name.split('_')[1])} · b{b['block']}"), fontsize=7, loc="left")
-    a1.set_title(A.safe(f"SNR {snr} · {n.get('qc', {}).get('verdict', '')} · "
-                        f"{100 * n.get('axon_fraction', 0):.2f}% axon"), fontsize=7, loc="left")  # fmt: skip
+    a1.set_title(A.safe(f"SNR(0.5) {snr} · {n.get('qc', {}).get('verdict', '')} · "
+                        f"{100 * (prob >= thr).mean():.1f}% px"), fontsize=7, loc="left")  # fmt: skip
 fig.suptitle(A.safe(f"{sid} / TRAILMAP detections, {per_tile} blocks per tile (MIP over z of each "
-                    "1.28 mm block; left image, right detections p >= 0.5 in magenta)"),
+                    f"1.28 mm block; left image, right detections p >= {thr} in magenta; % px = share of the "
+                    "projection detected)"),
              x=0.01, ha="left", fontfamily=A.HEAD, fontweight="bold", fontsize=13)  # fmt: skip
 fig.tight_layout(rect=(0, 0, 1, 0.985))
 A.savefig(fig, out, dpi=80)
