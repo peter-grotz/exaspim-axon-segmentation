@@ -84,7 +84,7 @@ for i, (g, c) in enumerate(zip(groups, colors, strict=True)):
 ax.set_xticks(pos)
 ax.set_xticklabels(labels, fontsize=10)
 ax.set_ylim(0, SNR_MAX * 1.05)
-A.style_ax(ax, title=f"all four, p >= {t:g}", ylabel="block SNR")
+A.style_ax(ax, title=f"all {len(data)} brains, p >= {t:g}", ylabel="block SNR")
 fig.suptitle(A.safe(f"same-day 1x vs 5x / block SNR at p >= {t:g}"), x=0.01, ha="left",
              fontfamily=A.HEAD, fontweight="bold", fontsize=20)  # fmt: skip
 fig.text(0.01, 0.005, A.safe(
