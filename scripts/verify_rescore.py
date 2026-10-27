@@ -16,8 +16,14 @@ import sys
 from pathlib import Path
 
 tok, cid, dest, orig = sys.argv[1], sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4])
-subprocess.run([sys.executable, "scripts/co_download.py", tok, cid, str(dest), "rescore",
-                "rescore_status.txt", "rescore.log", "--no-npz"], check=True, capture_output=True)  # fmt: skip
+import time  # noqa: E402
+
+for attempt in range(5):  # results can still be syncing just after a run completes
+    if subprocess.run([sys.executable, "scripts/co_download.py", tok, cid, str(dest), "rescore",
+                       "rescore_status.txt", "rescore.log", "--no-npz"],
+                      capture_output=True).returncode == 0:  # fmt: skip
+        break
+    time.sleep(60 * (attempt + 1))
 problems = []
 status = (
     (dest / "rescore_status.txt").read_text().strip()
