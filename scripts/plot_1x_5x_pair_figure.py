@@ -70,10 +70,25 @@ def block_preview(sid, tile, block):
     return z["raw_mip"].astype(np.float32), z["prob_mip"].astype(np.float32) / 255
 
 
+# one ratio scale for all rows: the largest upper interval over the brains
+RATIO_MAX = 6.0
+for spec_ in specs:
+    _, _, one_, five_ = spec_.split(":")
+    a1 = snrs(json.loads(Path(one_).read_text())["blocks"])
+    a5 = snrs(
+        [
+            b
+            for f in sorted(Path(five_).glob("*/snr_rescore.json"))
+            for b in json.loads(f.read_text())["blocks"]
+        ]
+    )
+    RATIO_MAX = max(RATIO_MAX, 1.25 * np.median(a5) / np.median(a1) * 1.15)
 A.apply_style("white")
-fig = plt.figure(figsize=(30, 7.2 * len(specs)))
+H = 6.2 * len(specs) + 2.0  # inches: rows plus ~1 in for the title and ~0.6 in for the note
+fig = plt.figure(figsize=(30, H))
 outer = fig.add_gridspec(len(specs), 5, width_ratios=[2.4, 2.4, 1.4, 0.8, 0.5], wspace=0.18,
-                         hspace=0.3, left=0.12, right=0.99)  # fmt: skip
+                         hspace=0.3, left=0.12, right=0.99,
+                         top=1 - 1.0 / H, bottom=1.0 / H)  # fmt: skip
 # genotype per sample, from the ExM Dataset Summary sheet (results/exm_dataset_summary.json)
 sheet = json.loads(Path("results/exm_dataset_summary.json").read_text())
 GENOTYPE = {str(d.get("Sample")).split("_")[0]: d.get("Genotype") for d in sheet}
@@ -190,11 +205,11 @@ for r, spec in enumerate(specs):
     axr.set_xticks([0])
     axr.set_xticklabels(["5x / 1x"])
     axr.set_xlim(-0.6, 0.6)
-    axr.set_ylim(0, max(6.0, hi_r * 1.25))
+    axr.set_ylim(0, RATIO_MAX)
     A.style_ax(axr, title="SNR ratio", ylabel="median 5x / median 1x", title_size=13)
-fig.suptitle(A.safe(f"1x vs 5x SNR · p >= {t:g}/"), x=0.01,
+fig.suptitle(A.safe(f"1x vs 5x SNR · p >= {t:g}/"), x=0.01, y=1 - 0.25 / H,
              ha="left", fontfamily=A.HEAD, fontweight="bold", fontsize=22)  # fmt: skip
-fig.text(0.01, 0.005, A.safe(
+fig.text(0.01, 0.15 / H, A.safe(
     "1x: binned scan (tile_000000), 1x fine-tuned TRAILMAP, 20 x 15 x 15 um, 200 um slab at mid depth; "
     "SNR from 300 random tissue blocks · 5x: v2 TRAILMAP at level 2 (4 x 3 x 3 um), snr-tiles blocks "
     "rescored at the threshold; 5x was segmented in sampled blocks only (no whole-brain 5x detection map): "
