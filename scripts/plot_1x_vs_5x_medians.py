@@ -1,6 +1,6 @@
 """One point per brain: median block SNR at 1x vs at 5x (same threshold), with the middle 50%.
 
-Usage: uv run python scripts/plot_1x_vs_5x_medians.py <out.png> <threshold> <subject>:<group>:<1x json>:<5x rescore dir> ...
+Usage: uv run python scripts/plot_1x_vs_5x_medians.py <out.png> <threshold> <subject>:<1x json>:<5x rescore dir> ...
 """
 
 import json
@@ -25,11 +25,10 @@ def vals(blocks):
                      and b[key].get("noise_sd", 1) > 0], float)  # fmt: skip
 
 
-col = {"bright": A.BRAND["blue"], "dim": A.BRAND["orange"]}
 A.apply_style("white")
 fig, ax = plt.subplots(figsize=(8.5, 7.5))
 for spec in specs:
-    sid, group, one, five = spec.split(":")
+    sid, one, five = spec.split(":")
     v1 = vals(json.loads(Path(one).read_text())["blocks"])
     v5 = vals(
         [
@@ -38,7 +37,7 @@ for spec in specs:
             for b in json.loads(f.read_text())["blocks"]
         ]
     )
-    c = col.get(group, A.BRAND["gray"])
+    c = A.BRAND["blue"]
     q1, q5 = np.percentile(v1, [25, 50, 75]), np.percentile(v5, [25, 50, 75])
     ax.plot([q1[0], q1[2]], [q5[1]] * 2, color=c, lw=1.5, alpha=0.5)
     ax.plot([q1[1]] * 2, [q5[0], q5[2]], color=c, lw=1.5, alpha=0.5)
@@ -54,9 +53,6 @@ ax.set_xlim(0, lim[0])
 ax.set_ylim(0, lim[1])
 A.style_ax(ax, title=f"median block SNR, 1x vs 5x · p >= {t:g}", xlabel="1x median SNR",
            ylabel="5x median SNR", grid_axis="both")  # fmt: skip
-ax.legend(handles=[plt.Line2D([], [], marker="o", ls="", color=col[g], label=g) for g in col]
-          + [plt.Line2D([], [], marker="o", ls="", color=A.BRAND["gray"], label="not assigned")],
-          frameon=False, loc="upper left")  # fmt: skip
 fig.text(0.01, 0.005, A.safe("dot: median, lines: 25-75% of blocks · dashed: 5x = 1x, 2x, 4x · same-day "
                              "1x (1x fine-tuned TRAILMAP, 300 tissue blocks) and 5x (v2, snr-tiles blocks)"),
          fontsize=8, color=A.C["muted"])  # fmt: skip
